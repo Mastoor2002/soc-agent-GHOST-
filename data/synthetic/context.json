@@ -1,0 +1,50 @@
+{
+  "title": "Practice attack (synthetic)",
+  "description": "A simulated day at a 42-person company with a hidden 3-stage attack: VPN brute force, lateral movement, and data exfiltration.",
+  "chart_note": "The red spike around 2 AM is the brute-force attack.",
+  "known_subnets": [
+    "10.0.0.0/8"
+  ],
+  "threat_intel": {
+    "185.220.101.47": {
+      "verdict": "malicious",
+      "tags": [
+        "tor-exit-node",
+        "credential-stuffing"
+      ],
+      "reports": 412,
+      "country": "DE"
+    },
+    "45.137.21.9": {
+      "verdict": "malicious",
+      "tags": [
+        "known-c2",
+        "data-exfil-infra"
+      ],
+      "reports": 88,
+      "country": "NL"
+    }
+  },
+  "users": {
+    "jsmith": {
+      "role": "Marketing Coordinator",
+      "normal_hosts": [
+        "WS-07",
+        "FS-01"
+      ],
+      "works_remote": false,
+      "admin": false
+    },
+    "admin_kim": {
+      "role": "IT Administrator",
+      "normal_hosts": [
+        "DC-01",
+        "FS-01",
+        "DB-01"
+      ],
+      "works_remote": true,
+      "admin": true
+    }
+  },
+  "directory_note": "Normal employees use their own workstation plus FS-01/WEB-01/HR-APP."
+}

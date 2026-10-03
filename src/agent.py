@@ -29,14 +29,22 @@ You receive one alert at a time and must investigate it using your tools before
 concluding. Work like a careful human analyst:
 
 1. Gather evidence with query_logs (look before and after the alert time).
-2. Check every external IP with ip_reputation.
-3. Use get_user_context to judge whether behavior is unusual for that person.
-4. Map the behavior to MITRE ATT&CK with mitre_lookup.
-5. Connect this alert to any earlier findings you are given (attack chains matter).
+   On Windows hosts, follow the process chain: which parent launched what.
+2. If you see an encoded command (-enc / -EncodedCommand), ALWAYS run
+   decode_command on it — the hidden content is often the strongest evidence.
+3. Check every IP that isn't the local machine with ip_reputation.
+4. Use get_user_context to judge whether behavior is unusual for that person.
+5. Map the behavior to MITRE ATT&CK with mitre_lookup.
+6. Connect this alert to any earlier findings you are given (attack chains matter).
 
-ATT&CK tips: if an attacker successfully logged in with a real user's password,
-include T1078 (Valid Accounts) in addition to the technique they used to get it.
-Call mitre_lookup at most twice per alert, then decide.
+ATT&CK guidance:
+- Alerts include rule_tags: the techniques the detection rule was written to catch.
+  Treat them as hypotheses. Keep the ones your evidence confirms, drop the rest,
+  and add any other techniques you find.
+- If an attacker successfully logged in with a real user's password, include
+  T1078 (Valid Accounts) in addition to the technique they used to get it.
+- Call mitre_lookup at most twice per alert (several behaviors per call), then decide.
+- You have a limited number of steps. Stop investigating once the evidence is clear.
 
 Never invent evidence. Only cite facts your tools returned.
 Containment actions are RECOMMENDATIONS that a human must approve.
@@ -104,14 +112,30 @@ class MockModel:
             "exfiltration": [("query_logs", {"ip": alert.get("dst_ip"), "limit": 6}),
                              ("ip_reputation", {"ip": alert.get("dst_ip")}),
                              ("mitre_lookup", {"behavior": "exfiltration"})],
-        }[alert["type"]]
+            "remote_service_execution": [
+                ("query_logs", {"host": alert.get("host"), "source": "service"}),
+                ("ip_reputation", {"ip": alert.get("src_ip") or ""}),
+                ("get_user_context", {"user": alert.get("user") or ""}),
+                ("mitre_lookup", {"behavior": "psexec new service service execution"})],
+            "encoded_powershell": [
+                ("query_logs", {"host": alert.get("host"), "source": "process"}),
+                ("decode_command", {"command": "powershell  -noP -sta -w 1 -enc"}),
+                ("mitre_lookup", {"behavior": "encoded powershell amsi"})],
+            "script_c2_beacon": [
+                ("query_logs", {"ip": alert.get("dst_ip")}),
+                ("ip_reputation", {"ip": alert.get("dst_ip")}),
+                ("mitre_lookup", {"behavior": "c2 beacon download"})],
+        }.get(alert["type"], [("query_logs", {"host": alert.get("host")})])
         if self.turn < len(plans):
             name, args = plans[self.turn]
             self.turn += 1
             return {"content": "", "tool_calls": [{"id": f"call_{self.turn}",
                                                    "name": name, "arguments": args}]}
         mitre = {"brute_force": ["T1110", "T1078"], "lateral_movement": ["T1021"],
-                 "exfiltration": ["T1048"]}[alert["type"]]
+                 "exfiltration": ["T1048"],
+                 "remote_service_execution": ["T1021.002", "T1543.003", "T1569.002"],
+                 "encoded_powershell": ["T1059.001", "T1027", "T1562.001"],
+                 "script_c2_beacon": ["T1071.001", "T1105"]}.get(alert["type"], [])
         return {"content": json.dumps({
             "verdict": "true_positive", "confidence": 90,
             "title": f"[MOCK] {alert['type'].replace('_', ' ').title()}",
@@ -121,20 +145,63 @@ class MockModel:
             "related_to_prior": "See earlier alerts" if "PRIOR FINDINGS" in messages[1]["content"]
                                 and "none yet" not in messages[1]["content"] else None,
             "recommended_actions": [{"action": "Escalate to on-call analyst",
-                                     "target": alert.get("user") or alert.get("host"),
+                                     "target": alert.get("host") or alert.get("user"),
                                      "priority": "immediate"}]}), "tool_calls": []}
 
 
 # --------------------------------------------------------------------------
 # The agent loop
 # --------------------------------------------------------------------------
-def parse_report(text: str) -> dict:
-    """Models sometimes wrap JSON in prose or ```fences```. Grab the {...} part."""
-    match = re.search(r"\{.*\}", text, re.DOTALL)
+def parse_report(text: str) -> tuple[dict | None, str | None]:
+    """Models sometimes wrap JSON in prose or ```fences```. Grab the {...} part.
+    Returns (report, None) on success or (None, error message) on failure."""
+    match = re.search(r"\{.*\}", text or "", re.DOTALL)
+    if not match:
+        return None, "No JSON object found. You wrote prose instead of the report."
     try:
-        return json.loads(match.group(0)) if match else {"verdict": "needs_review", "raw": text}
-    except json.JSONDecodeError:
-        return {"verdict": "needs_review", "raw": text}
+        report = json.loads(match.group(0))
+    except json.JSONDecodeError as e:
+        return None, f"Invalid JSON: {e.msg} at character {e.pos}."
+    if report.get("verdict") not in ("true_positive", "false_positive", "needs_review"):
+        return None, "The 'verdict' field must be true_positive, false_positive or needs_review."
+    return report, None
+
+
+def finalize(reply_text: str, messages: list[dict], model) -> dict:
+    """SELF-CORRECTION: if the report can't be read, show the model its own mistake
+    and let it fix it once — instead of throwing away a good investigation."""
+    report, error = parse_report(reply_text)
+    if report is not None:
+        return report
+    messages.append({"role": "assistant", "content": reply_text or ""})
+    messages.append({"role": "user", "content": f"Your final report could not be read: {error} "
+                     "Reply with ONLY the corrected JSON object, nothing else."})
+    retry = model.step(messages, allow_tools=False)
+    report, error = parse_report(retry["content"])
+    if report is not None:
+        report["self_corrected"] = True
+        return report
+    return {"verdict": "needs_review", "summary": f"Report unreadable after retry ({error})",
+            "raw": (retry["content"] or reply_text or "")[:2000]}
+
+
+TECHNIQUE_ID = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
+
+
+def ground_mitre(report: dict, alert: dict, trace: list[dict]) -> dict:
+    """GROUNDING CHECK: the model may only claim techniques it actually saw this
+    investigation — in the alert's rule tags or in a tool result. Anything else is
+    probably recalled from memory (a hallucination), so it is set aside as
+    'unverified' and doesn't count toward the score."""
+    seen = set(alert.get("rule_tags", []))
+    for t in trace:
+        seen |= set(TECHNIQUE_ID.findall(t.get("result_full", t.get("result_preview", ""))))
+    claimed = [m for m in report.get("mitre", []) if isinstance(m, str)]
+    report["mitre"] = [m for m in claimed if m in seen]
+    unverified = [m for m in claimed if m not in seen]
+    if unverified:
+        report["unverified_mitre"] = unverified
+    return report
 
 
 def investigate(alert: dict, toolbox: Toolbox, model, prior: list[dict], verbose=True,
@@ -148,6 +215,7 @@ def investigate(alert: dict, toolbox: Toolbox, model, prior: list[dict], verbose
         {"role": "user", "content": f"ALERT:\n{json.dumps(alert)}\n\nPRIOR FINDINGS:\n{prior_text}"},
     ]
     trace = []  # every step the agent took — this powers the dashboard timeline later
+    toolbox.reset()
 
     for step in range(1, MAX_STEPS + 1):
         last = step == MAX_STEPS
@@ -157,7 +225,8 @@ def investigate(alert: dict, toolbox: Toolbox, model, prior: list[dict], verbose
         reply = model.step(messages, allow_tools=not last)
 
         if not reply["tool_calls"]:  # no more tools -> this is the final answer
-            report = parse_report(reply["content"])
+            report = finalize(reply["content"], messages, model)
+            report = ground_mitre(report, alert, trace)
             report.update({"alert_id": alert["id"], "steps": step, "trace": trace})
             return report
 
@@ -172,7 +241,7 @@ def investigate(alert: dict, toolbox: Toolbox, model, prior: list[dict], verbose
             if verbose:
                 print(f"    step {step}: {tc['name']}({tc['arguments']}) -> {result[:90]}...")
             trace.append({"step": step, "tool": tc["name"], "args": tc["arguments"],
-                          "result_preview": result[:300]})
+                          "result_preview": result[:300], "result_full": result})
             if on_step:
                 on_step(trace[-1])
             messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})

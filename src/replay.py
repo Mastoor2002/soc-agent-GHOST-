@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator
 
-LOG_FILE = Path(__file__).resolve().parent.parent / "data" / "logs.jsonl"
+LOG_FILE = Path(__file__).resolve().parent.parent / "data" / "synthetic" / "logs.jsonl"
 
 
 def stream_logs(path: Path = LOG_FILE, speed: float = 0) -> Iterator[dict]:

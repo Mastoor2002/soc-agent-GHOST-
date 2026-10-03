@@ -1,0 +1,29 @@
+{
+  "title": "Real attack: Empire Invoke-PsExec (OTRF)",
+  "description": "Recorded in a lab Windows domain by the OTRF Security Datasets project. An attacker with a foothold on WORKSTATION5 uses the Empire framework to move to WORKSTATION6. Thousands of normal background events surround the attack.",
+  "chart_note": "Real recordings are short: about two minutes of a busy Windows network.",
+  "source_url": "https://github.com/OTRF/Security-Datasets",
+  "known_subnets": [
+    "172.18.0.0/16"
+  ],
+  "threat_intel": {},
+  "users": {
+    "pgustavo": {
+      "role": "Domain user (lab)",
+      "normal_hosts": [
+        "WORKSTATION5"
+      ],
+      "admin": "unknown"
+    },
+    "sbeavers": {
+      "role": "Domain user (lab)",
+      "normal_hosts": [
+        "WORKSTATION6"
+      ],
+      "admin": "unknown"
+    }
+  },
+  "directory_note": "Lab environment: the dataset does not include real job roles.",
+  "otrf_id": "SDWIN-190518210652",
+  "raw_events": 4348
+}

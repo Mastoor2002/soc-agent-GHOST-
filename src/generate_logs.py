@@ -6,6 +6,8 @@ you need data where YOU know the right answer, so you can prove your agent works
 This script makes a day of "normal" company activity and secretly plants a
 3-stage attack in it. The answer key goes in a separate file (ground_truth.json)
 so the detector and agent can never cheat by reading it.
+It also writes context.json: what the company's SOC already knows (IP ranges,
+employee directory, threat-intel feed). See src/scenarios.py.
 
 The attack chain (a classic real-world pattern):
   1. Brute force   — an outside IP guesses the VPN password for user 'jsmith' and gets in
@@ -15,7 +17,7 @@ The attack chain (a classic real-world pattern):
 Later you can swap this for a real public dataset (Splunk BOTS v3, CIC-IDS2017,
 LANL auth logs). The rest of the pipeline won't care, as long as the columns match.
 
-Run:  python -m src.generate_logs
+Run:  python -m src.generate_logs        (writes data/synthetic/)
 """
 import json
 import random
@@ -24,7 +26,7 @@ from pathlib import Path
 
 random.seed(42)  # same "random" data every run, so results are reproducible
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "synthetic"
 DAY = datetime(2026, 10, 1)
 
 USERS = [f"user{i:02d}" for i in range(1, 41)] + ["jsmith", "admin_kim"]
@@ -37,6 +39,29 @@ EXFIL_IP = "45.137.21.9"         # attacker-controlled server
 # Each user "owns" a workstation — this is what normal looks like for them.
 HOME_WS = {u: random.choice(WORKSTATIONS) for u in USERS}
 HOME_WS["jsmith"] = "WS-07"
+
+
+# What this company's SOC already knows — the agent's tools read this
+CONTEXT = {
+    "title": "Practice attack (synthetic)",
+    "description": "A simulated day at a 42-person company with a hidden 3-stage attack: "
+                   "VPN brute force, lateral movement, and data exfiltration.",
+    "chart_note": "The red spike around 2 AM is the brute-force attack.",
+    "known_subnets": ["10.0.0.0/8"],
+    "threat_intel": {
+        ATTACKER_IP: {"verdict": "malicious", "tags": ["tor-exit-node", "credential-stuffing"],
+                      "reports": 412, "country": "DE"},
+        EXFIL_IP: {"verdict": "malicious", "tags": ["known-c2", "data-exfil-infra"],
+                   "reports": 88, "country": "NL"},
+    },
+    "users": {
+        "jsmith": {"role": "Marketing Coordinator", "normal_hosts": ["WS-07", "FS-01"],
+                   "works_remote": False, "admin": False},
+        "admin_kim": {"role": "IT Administrator", "normal_hosts": ["DC-01", "FS-01", "DB-01"],
+                      "works_remote": True, "admin": True},
+    },
+    "directory_note": "Normal employees use their own workstation plus FS-01/WEB-01/HR-APP.",
+}
 
 
 def ip_for(host: str) -> str:
@@ -144,9 +169,11 @@ def main():
             f.write(json.dumps(e) + "\n")
     with open(DATA_DIR / "ground_truth.json", "w") as f:
         json.dump(truth, f, indent=2)
+    with open(DATA_DIR / "context.json", "w") as f:
+        json.dump(CONTEXT, f, indent=2)
 
-    print(f"Wrote {len(events):,} log events -> data/logs.jsonl")
-    print(f"Planted {len(truth)} attack stages -> data/ground_truth.json (the answer key)")
+    print(f"Wrote {len(events):,} log events -> data/synthetic/logs.jsonl")
+    print(f"Planted {len(truth)} attack stages -> data/synthetic/ground_truth.json (the answer key)")
 
 
 if __name__ == "__main__":

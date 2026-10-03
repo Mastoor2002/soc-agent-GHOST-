@@ -1,0 +1,9 @@
+[
+  {
+    "stage": "lateral_movement",
+    "mitre": [
+      "T1021"
+    ],
+    "note": "Official OTRF label for SDWIN-190518210652 (Empire Invoke PsExec)"
+  }
+]

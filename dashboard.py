@@ -1,5 +1,5 @@
 """
-STEP 7 — The dashboard: a web page that shows your agent working, live.
+STEP 7 — The GHOST dashboard: a web page that shows your agent working, live.
 
 Streamlit turns a Python script into a web page. Each st.something() call
 draws one element on the page (a title, a chart, a button...). When you click
@@ -19,32 +19,33 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from src import detect
+from src import detect, scenarios
 from src.agent import MockModel, NIMModel, investigate
 from src.tools import MITRE, Toolbox
 
 ROOT = Path(__file__).resolve().parent
-REPORTS = ROOT / "reports" / "incidents.json"
 load_dotenv(ROOT / ".env")
 
-st.set_page_config(page_title="SOC Agent", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="GHOST", page_icon="👻", layout="wide")
 
 SEV_COLOR = {"critical": "red", "high": "orange", "medium": "blue", "low": "gray"}
 VERDICT_LABEL = {"true_positive": ":red[● Confirmed attack]",
                  "false_positive": ":green[● False alarm]",
                  "needs_review": ":orange[● Needs human review]"}
+# Chart categories, in drawing order, with their colors
+KINDS = {"Failed logins": "#e5484d", "Logins": "#3e63dd", "Programs & services": "#f5a623",
+         "Network traffic": "#8b8d98", "Background (Windows)": "#3a3c44"}
 
 
 # ---------------------------------------------------------------- data
-@st.cache_data  # run detection once, not on every click
-def load_everything():
-    df = detect.load_logs()
+@st.cache_data  # run detection once per scenario, not on every click
+def load_everything(scenario: str):
+    df = detect.load_logs(scenarios.path(scenario) / "logs.jsonl")
     t0 = time.perf_counter()
     alerts = detect.run_all(df)
     return df, alerts, time.perf_counter() - t0
 
 
-df, alerts, detect_secs = load_everything()
 ss = st.session_state
 ss.setdefault("reports", {})     # alert_id -> report
 ss.setdefault("decisions", {})   # "ALERT-001:0" -> "approved" / "rejected"
@@ -52,7 +53,12 @@ ss.setdefault("decisions", {})   # "ALERT-001:0" -> "approved" / "rejected"
 
 # ---------------------------------------------------------------- sidebar
 with st.sidebar:
-    st.header("🛡️ Control panel")
+    st.header("👻 GHOST control panel")
+    names = scenarios.list_scenarios()
+    scenario = st.selectbox("Scenario", names,
+                            format_func=lambda n: scenarios.load_context(n).get("title", n))
+    if ss.get("scenario") != scenario:  # switching scenario clears old results
+        ss.scenario, ss.reports, ss.decisions = scenario, {}, {}
     mode = st.radio("Detective", ["Practice (scripted)", "Nemotron (real AI)"],
                     help="Practice mode needs no API key. Real AI uses your NVIDIA key from .env.")
     has_key = bool(os.environ.get("NVIDIA_API_KEY", "").startswith("nvapi-")
@@ -63,6 +69,7 @@ with st.sidebar:
             st.error("No NVIDIA key found in .env")
     run = st.button("▶ Run live investigation", type="primary", use_container_width=True,
                     disabled=mode.startswith("Nemotron") and not has_key)
+    REPORTS = ROOT / "reports" / f"incidents_{scenario}.json"
     if REPORTS.exists() and st.button("📂 Load last saved run", use_container_width=True):
         ss.reports = {r["alert_id"]: r for r in json.loads(REPORTS.read_text())}
         ss.decisions = {}
@@ -73,38 +80,56 @@ with st.sidebar:
     st.caption("Tip for demos: run once with Nemotron, then use **Load last saved run** "
                "so you never wait on the API while presenting.")
 
+df, alerts, detect_secs = load_everything(scenario)
+ctx = scenarios.load_context(scenario)
+
 
 # ---------------------------------------------------------------- header + KPIs
-st.title("SOC Agent")
-st.caption("Fast detection finds the suspicious activity. A Nemotron agent investigates "
-           "each alert like a human analyst.")
+st.title("👻 GHOST")
+st.caption("Generative Hunting & Operations Security Toolkit · fast detection finds the "
+           "suspicious activity, a Nemotron agent investigates each alert like a human analyst.")
+with st.container(border=True):
+    st.markdown(f"**{ctx.get('title', scenario)}**  \n{ctx.get('description', '')}")
+    if ctx.get("source_url"):
+        st.caption(f"Data source: {ctx['source_url']} · dataset {ctx.get('otrf_id', '')}")
 
 reports = [ss.reports[a["id"]] for a in alerts if a["id"] in ss.reports]
 confirmed = [r for r in reports if r.get("verdict") == "true_positive"]
-truth = json.loads((ROOT / "data" / "ground_truth.json").read_text())
-expected = {t for s in truth for t in s["mitre"]}
 found = {t for r in confirmed for t in r.get("mitre", [])}
+expected, hit = scenarios.technique_recall(scenarios.load_truth(scenario), found)
 avg_secs = (sum(r.get("seconds", 0) for r in reports) / len(reports)) if reports else None
 
 k = st.columns(5)
 k[0].metric("Events scanned", f"{len(df):,}", f"in {detect_secs:.2f}s", delta_color="off")
 k[1].metric("Alerts raised", len(alerts))
 k[2].metric("Confirmed attacks", len(confirmed) if reports else "—")
-k[3].metric("MITRE coverage", f"{len(found & expected)}/{len(expected)}" if reports else "—")
+k[3].metric("Answer-key coverage", f"{len(hit)}/{len(expected)}" if reports else "—",
+            help="MITRE techniques in the scenario's answer key that the agent identified. "
+                 "A sub-technique (T1021.002) counts for its parent (T1021).")
 k[4].metric("Avg triage time", f"{avg_secs:.0f}s" if avg_secs else "—",
-            "vs ~15 min manual" if avg_secs else None, delta_color="off")
+            "vs ~15 min manual (estimate)" if avg_secs else None, delta_color="off")
 
 
 # ---------------------------------------------------------------- activity chart
-st.subheader("Activity over the day")
-bins = df.assign(
-    bucket=df.timestamp.dt.floor("30min"),
-    kind=df.apply(lambda r: "Failed logins" if r.get("outcome") == "failure"
-                  else ("Logins" if r["source"] == "auth" else "Network traffic"), axis=1))
-pivot = bins.pivot_table(index="bucket", columns="kind", values="source",
-                         aggfunc="count", fill_value=0)
-st.bar_chart(pivot, height=220, color=["#e5484d", "#3e63dd", "#8b8d98"][:len(pivot.columns)])
-st.caption("The red spike around 2 AM is the brute-force attack. Can you spot it without the agent?")
+def kind(r):
+    if r["source"] == "auth":
+        return "Failed logins" if r.get("outcome") == "failure" else "Logins"
+    if r["source"] in ("process", "service"):
+        return "Programs & services"
+    if r["source"] in ("network", "firewall"):
+        return "Network traffic"
+    return "Background (Windows)"
+
+
+span = (df.timestamp.max() - df.timestamp.min()).total_seconds()
+freq = "30min" if span > 6 * 3600 else "5min" if span > 3600 else "1min" if span > 900 else "5s"
+st.subheader("Activity timeline")
+pivot = (df.assign(bucket=df.timestamp.dt.floor(freq), kind=df.apply(kind, axis=1))
+         .pivot_table(index="bucket", columns="kind", values="source", aggfunc="count",
+                      fill_value=0))
+cols = [c for c in KINDS if c in pivot.columns]
+st.bar_chart(pivot[cols], height=220, color=[KINDS[c] for c in cols])
+st.caption(ctx.get("chart_note", "") + " Can you spot the attack without the agent?")
 
 
 # ---------------------------------------------------------------- live run
@@ -120,7 +145,7 @@ def run_live():
                     time.sleep(0.5)  # slow the scripted run down so you can watch it
             t0 = time.perf_counter()
             try:
-                report = investigate(alert, Toolbox(df), model, prior=prior,
+                report = investigate(alert, Toolbox(df, ctx), model, prior=prior,
                                      verbose=False, on_step=show_step)
             except Exception as e:
                 status.update(label=f"{alert['id']} failed: {e}", state="error")
@@ -130,6 +155,9 @@ def run_live():
             ss.reports[alert["id"]] = report
             status.update(label=f"{alert['id']} → {report.get('title', report.get('verdict'))}",
                           state="complete", expanded=False)
+    for r in prior:
+        for t in r.get("trace", []):
+            t.pop("result_full", None)
     REPORTS.parent.mkdir(exist_ok=True)
     REPORTS.write_text(json.dumps(prior, indent=2))
 
@@ -189,6 +217,9 @@ for a in alerts:
             if r.get("mitre"):
                 st.markdown("**MITRE ATT&CK**  \n" + "  ".join(
                     f"`{t}` {MITRE.get(t, {}).get('name', '')}" for t in r["mitre"]))
+            if r.get("unverified_mitre"):
+                st.caption("⚠️ Rejected by grounding check (claimed without evidence): "
+                           + ", ".join(r["unverified_mitre"]))
         with right:
             st.markdown("**Recommended actions** · a human must approve")
             for i, act in enumerate(r.get("recommended_actions", [])):
