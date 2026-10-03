@@ -137,7 +137,10 @@ def parse_report(text: str) -> dict:
         return {"verdict": "needs_review", "raw": text}
 
 
-def investigate(alert: dict, toolbox: Toolbox, model, prior: list[dict], verbose=True) -> dict:
+def investigate(alert: dict, toolbox: Toolbox, model, prior: list[dict], verbose=True,
+                on_step=None) -> dict:
+    """on_step: optional function called after every tool call — the dashboard uses
+    it to show the investigation live, step by step."""
     prior_text = "\n".join(f"- {p['alert_id']}: {p.get('title')} ({p.get('verdict')})"
                            for p in prior) or "none yet"
     messages = [
@@ -170,6 +173,8 @@ def investigate(alert: dict, toolbox: Toolbox, model, prior: list[dict], verbose
                 print(f"    step {step}: {tc['name']}({tc['arguments']}) -> {result[:90]}...")
             trace.append({"step": step, "tool": tc["name"], "args": tc["arguments"],
                           "result_preview": result[:300]})
+            if on_step:
+                on_step(trace[-1])
             messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
 
     return {"alert_id": alert["id"], "verdict": "needs_review",

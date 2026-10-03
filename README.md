@@ -37,6 +37,13 @@ cp .env.example .env               # paste your key into .env
 python -m src.main                 # now the real Nemotron investigates
 ```
 
+### Dashboard
+
+```bash
+streamlit run dashboard.py
+```
+Opens a web page at http://localhost:8501. Press **▶ Run live investigation** to watch the agent work.
+
 ---
 
 ## Read the code in this order
@@ -51,6 +58,7 @@ Every file starts with a "WHY" comment explaining the concept. Read them in orde
 | 4 | `src/tools.py` | **Tool calling**: how an LLM "does things" safely |
 | 5 | `src/agent.py` | **The agent loop**: the core pattern behind every AI agent |
 | 6 | `src/main.py` | Wiring it together, plus scoring against the answer key |
+| 7 | `dashboard.py` | Streamlit web dashboard: live investigation, attack chain, human approval |
 
 **Try this:** run individual steps on their own (`python -m src.detect`, `python -m src.replay`) and change the thresholds in `detect.py` to see what happens.
 
@@ -86,7 +94,7 @@ python -m cudf.pandas -m src.main
 - [ ] **Week 2: Real data.** Swap in a public dataset (Splunk BOTS v3, CIC-IDS2017, or LANL auth)
 - [ ] **Week 3: GPU proof.** Scale logs to millions of rows; benchmark pandas (CPU) vs `cudf.pandas` (GPU) on Nebius
 - [ ] **Week 3: RAG.** Replace the mini MITRE table with vector search over the full ATT&CK dataset
-- [ ] **Week 3: Dashboard.** Live alert feed, plus a clickable investigation timeline (the `trace` field is already recorded)
+- [x] **Dashboard.** Live investigation view, attack chain, human-approved actions *(done early)*
 - [ ] **Week 4: Polish.** Metrics (accuracy, false positives, time to triage), a 3-minute demo video, and the submission
 
 ---
