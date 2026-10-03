@@ -1,0 +1,35 @@
+[
+  {
+    "stage": "brute_force",
+    "time": "2026-10-01T02:18:24",
+    "user": "jsmith",
+    "ip": "185.220.101.47",
+    "mitre": [
+      "T1110",
+      "T1078"
+    ]
+  },
+  {
+    "stage": "lateral_movement",
+    "time": "2026-10-01T02:38:24",
+    "user": "jsmith",
+    "hosts": [
+      "WS-14",
+      "DB-01",
+      "FS-01",
+      "DC-01"
+    ],
+    "mitre": [
+      "T1021"
+    ]
+  },
+  {
+    "stage": "exfiltration",
+    "time": "2026-10-01T03:20:00",
+    "host": "FS-01",
+    "ip": "45.137.21.9",
+    "mitre": [
+      "T1048"
+    ]
+  }
+]
