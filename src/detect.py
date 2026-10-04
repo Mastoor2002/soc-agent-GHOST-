@@ -44,6 +44,13 @@ def load_logs(path=LOG_FILE) -> pd.DataFrame:
     return df.sort_values("timestamp").reset_index(drop=True)
 
 
+def _basenames(col: pd.Series) -> pd.Series:
+    """Vectorized _basename for a whole column. Column-wide string operations run on
+    the GPU under RAPIDS cudf.pandas; a Python function applied row by row cannot."""
+    return (col.fillna("").astype(str).str.replace("/", "\\", regex=False)
+            .str.split("\\").str[-1].str.lower())
+
+
 def _basename(path) -> str:
     """'C:\\Windows\\System32\\cmd.exe' -> 'cmd.exe'"""
     return str(path).replace("/", "\\").split("\\")[-1].lower()
@@ -106,11 +113,12 @@ def detect_exfiltration(df: pd.DataFrame, mb_threshold: float = 500) -> list[dic
     """Large volumes of data leaving to an EXTERNAL address.
     Internal backups (10.x.x.x) are excluded — that's the false-positive trap."""
     fw = df[(df.source == "firewall") & ~df.dst_ip.astype(str).str.startswith("10.")]
-    totals = fw.groupby(["host", "dst_ip"]).agg(
-        mb=("bytes_out", lambda b: b.sum() / 1e6),
+    totals = fw.groupby(["host", "dst_ip"]).agg(  # built-in aggregations only: GPU-friendly
+        total_bytes=("bytes_out", "sum"),
         first=("timestamp", "min"),
         conns=("bytes_out", "size"),
     ).reset_index()
+    totals["mb"] = totals["total_bytes"] / 1e6
     alerts = []
     for _, r in totals[totals.mb > mb_threshold].iterrows():
         alerts.append({
@@ -187,7 +195,7 @@ def detect_script_beacon(df: pd.DataFrame) -> list[dict]:
     """A command shell or script engine making a web connection. Browsers talk to
     the web; PowerShell running as SYSTEM usually shouldn't — it's a classic C2 callback."""
     net = df[(df.source == "network")
-             & df.process.apply(_basename).isin(SHELLS)
+             & _basenames(df.process).isin(SHELLS)
              & df.dst_port.isin([80, 443, 8080, 8443])]
     alerts = []
     for (host, dst), g in net.groupby(["host", "dst_ip"]):
@@ -219,8 +227,8 @@ def detect_wmi_remote_exec(df: pd.DataFrame) -> list[dict]:
     procs = df[df.source == "process"]
     if procs.empty:
         return []
-    procs = procs[(procs.parent_process.apply(_basename) == "wmiprvse.exe")
-                  & procs.process.apply(_basename).isin(SHELLS)]
+    procs = procs[(_basenames(procs.parent_process) == "wmiprvse.exe")
+                  & _basenames(procs.process).isin(SHELLS)]
     alerts = []
     for host, g in procs.groupby("host"):
         first = g.iloc[0]

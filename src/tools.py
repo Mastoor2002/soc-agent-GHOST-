@@ -295,3 +295,49 @@ TOOL_SCHEMAS = [
         "parameters": {"type": "object", "properties": {"command": {"type": "string"}},
                        "required": ["command"]}}},
 ]
+
+
+# ---------------------------------------------------------------- plain-English step summaries
+def summarize_step(name: str, args: dict, result: str) -> str:
+    """One readable line describing what a tool call found — shown in the dashboard's
+    investigation trail instead of raw JSON. Works on full or truncated results."""
+    try:
+        r = json.loads(result)
+    except Exception:
+        r = {}
+    def first(pattern, default=""):
+        m = re.search(pattern, result)
+        return m.group(1) if m else default
+    if r.get("error") or '"error"' in result[:20]:
+        return "Tool refused: " + str(r.get("error") or first(r'"error": "([^"]+)')).split(".")[0]
+    if name == "query_logs":
+        filt = ", ".join(f"{k} {v}" for k, v in args.items() if k in ("user", "host", "ip", "source", "text") and v)
+        n = r.get("total_matches", first(r'"total_matches": (\d+)', "?"))
+        return f"{n} matching event{'' if str(n) == '1' else 's'}" + (f" ({filt})" if filt else "")
+    if name == "decode_command":
+        ind = r.get("indicators") or {k: True for k in re.findall(r'"(\w+)": true', result)}
+        words = {"disables_script_block_logging": "disables security logging",
+                 "bypasses_amsi_antivirus_scan": "bypasses antivirus (AMSI)",
+                 "downloads_from_web": "downloads code", "runs_downloaded_code": "runs it",
+                 "uses_proxy_credentials": "uses proxy credentials",
+                 "contains_nested_base64": "hides more encoded data"}
+        found = [words[k] for k in ind if k in words]
+        urls = r.get("urls_contacted") or re.findall(r"https?://[\w.:/-]+", result)
+        return ("Hidden command " + (", ".join(found) if found else "decoded")
+                + (f"; contacts {', '.join(urls[:2])}" if urls else ""))
+    if name == "ip_reputation":
+        verdict = r.get("verdict", first(r'"verdict": "([^"]+)', "?"))
+        note = r.get("note") or ", ".join(r.get("tags", []))
+        return f"{args.get('ip')} is {verdict}" + (f": {note}" if note else "")
+    if name == "get_user_context":
+        if r.get("role"):
+            hosts = r.get("normal_hosts")
+            return f"{args.get('user')}: {r['role']}" + (f", normally uses {', '.join(hosts)}"
+                                                        if isinstance(hosts, list) else "")
+        return f"{args.get('user')} is not in the company directory"
+    if name == "mitre_lookup":
+        ids = [m["id"] for m in r.get("matches", [])] if isinstance(r.get("matches"), list) \
+            else re.findall(r'"id": "(T[\d.]+)"', result)
+        return ("Matched " + ", ".join(f"{i} {MITRE.get(i, {}).get('name', '')}".strip() for i in ids[:3])
+                if ids else "No direct technique match")
+    return result[:120]

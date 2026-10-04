@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 from src import detect, scenarios
 from src.agent import MockModel, NIMModel, investigate
-from src.tools import MITRE, Toolbox
+from src.tools import MITRE, Toolbox, summarize_step
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
@@ -72,7 +72,7 @@ with st.sidebar:
     REPORTS = ROOT / "reports" / f"incidents_{scenario}.json"
     if REPORTS.exists() and st.button("📂 Load last saved run", use_container_width=True):
         ss.reports = {r["alert_id"]: r for r in json.loads(REPORTS.read_text())}
-        ss.decisions = {}
+        ss.decisions, ss.showing_saved = {}, True
     if ss.reports and st.button("Clear results", use_container_width=True):
         ss.reports, ss.decisions = {}, {}
         st.rerun()
@@ -83,6 +83,12 @@ with st.sidebar:
 df, alerts, detect_secs = load_everything(scenario)
 ctx = scenarios.load_context(scenario)
 
+# First visit to a scenario: show the saved Nemotron investigation right away,
+# so visitors see real results without an API key or a wait.
+if ss.get("autoloaded") != scenario and not ss.reports and REPORTS.exists():
+    ss.reports = {r["alert_id"]: r for r in json.loads(REPORTS.read_text())}
+    ss.autoloaded, ss.showing_saved = scenario, True
+
 
 # ---------------------------------------------------------------- header + KPIs
 st.title("👻 GHOST")
@@ -92,6 +98,10 @@ with st.container(border=True):
     st.markdown(f"**{ctx.get('title', scenario)}**  \n{ctx.get('description', '')}")
     if ctx.get("source_url"):
         st.caption(f"Data source: {ctx['source_url']} · dataset {ctx.get('otrf_id', '')}")
+
+if ss.get("showing_saved") and ss.reports:
+    st.info("Showing a saved investigation by NVIDIA Nemotron (October 3 benchmark run). "
+            "Press **▶ Run live investigation** to watch an investigation happen.")
 
 reports = [ss.reports[a["id"]] for a in alerts if a["id"] in ss.reports]
 confirmed = [r for r in reports if r.get("verdict") == "true_positive"]
@@ -140,7 +150,7 @@ def run_live():
         with st.status(f"🔎 Investigating {alert['id']}: {alert['summary']}",
                        expanded=True) as status:
             def show_step(t):
-                st.write(f"**Step {t['step']}** · `{t['tool']}` {t['args']}")
+                st.write(f"**Step {t['step']}** · `{t['tool']}` → {t.get('summary', t['args'])}")
                 if mode.startswith("Practice"):
                     time.sleep(0.5)  # slow the scripted run down so you can watch it
             t0 = time.perf_counter()
@@ -158,12 +168,15 @@ def run_live():
     for r in prior:
         for t in r.get("trace", []):
             t.pop("result_full", None)
-    REPORTS.parent.mkdir(exist_ok=True)
-    REPORTS.write_text(json.dumps(prior, indent=2))
+    # Only real Nemotron runs replace the saved results; a practice run never
+    # overwrites them (on a shared server, visitors would erase each other's view)
+    if mode.startswith("Nemotron"):
+        REPORTS.parent.mkdir(exist_ok=True)
+        REPORTS.write_text(json.dumps(prior, indent=2))
 
 
 if run:
-    ss.reports, ss.decisions = {}, {}
+    ss.reports, ss.decisions, ss.showing_saved = {}, {}, False
     st.subheader("Live investigation")
     run_live()
     st.rerun()  # redraw the page with the finished results
@@ -249,5 +262,7 @@ for a in alerts:
         with st.expander(f"Investigation trace · {len(r.get('trace', []))} tool calls · "
                          f"{r.get('seconds', '?')}s"):
             for t in r.get("trace", []):
-                st.markdown(f"**Step {t['step']}** · `{t['tool']}`  {t['args']}")
-                st.code(t["result_preview"], language="json", wrap_lines=True)
+                found = t.get("summary") or summarize_step(t["tool"], t["args"], t["result_preview"])
+                st.markdown(f"**Step {t['step']}** · `{t['tool']}` → {found}")
+                with st.popover("Raw tool output"):
+                    st.code(t["result_preview"], language="json", wrap_lines=True)

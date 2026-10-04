@@ -1,0 +1,329 @@
+[
+  {
+    "verdict": "true_positive",
+    "confidence": 95,
+    "title": "Encoded PowerShell command disabling security controls on WORKSTATION6",
+    "summary": "An encoded PowerShell command executed as SYSTEM on WORKSTATION6, launched by cmd.exe. The command decoded to disable script block logging and AMSI, then download and execute code from external IP 10.10.10.5 - a private address outside company network ranges. This is a classic defense evasion and intrusion technique.",
+    "mitre": [
+      "T1027",
+      "T1059.001",
+      "T1105",
+      "T1562.001"
+    ],
+    "evidence": [
+      "Encoded PowerShell command (-enc flag) launched by cmd.exe as SYSTEM on WORKSTATION6",
+      "Decoded command disables ScriptBlockLogging and EnableScriptBlockInvocationLogging",
+      "Decoded command bypasses AMSI antivirus scanning",
+      "Command downloads from IP 10.10.10.5 flagged as suspicious (private, not in company network)",
+      "Process chain: services.exe -> cmd.exe -> powershell.exe -> whoami.exe",
+      "IP 10.10.10.5 contacted during malicious activity"
+    ],
+    "related_to_prior": null,
+    "recommended_actions": [
+      {
+        "action": "Isolate WORKSTATION6 from network immediately",
+        "target": "WORKSTATION6",
+        "priority": "immediate"
+      },
+      {
+        "action": "Terminate active PowerShell and whoami processes on WORKSTATION6",
+        "target": "WORKSTATION6",
+        "priority": "immediate"
+      },
+      {
+        "action": "Block outbound connections to IP 10.10.10.5 at firewall/proxy",
+        "target": "network-boundary",
+        "priority": "immediate"
+      },
+      {
+        "action": "Collect full process tree and memory dump from WORKSTATION6 for forensic analysis",
+        "target": "WORKSTATION6",
+        "priority": "soon"
+      },
+      {
+        "action": "Review other hosts for similar encoded PowerShell patterns and lateral movement",
+        "target": "enterprise",
+        "priority": "soon"
+      },
+      {
+        "action": "Check for persistence mechanisms created by the decoded script",
+        "target": "WORKSTATION6",
+        "priority": "later"
+      }
+    ],
+    "alert_id": "ALERT-001",
+    "steps": 10,
+    "trace": [
+      {
+        "step": 1,
+        "tool": "query_logs",
+        "args": {
+          "host": "WORKSTATION6",
+          "start": "2020-09-20T16:15:00",
+          "text": "powershell",
+          "end": "2020-09-20T16:20:00",
+          "limit": 20,
+          "source": "process"
+        },
+        "result_preview": "{\"total_matches\": 4, \"showing\": 4, \"events\": [{\"timestamp\": \"2020-09-20 16:16:57.114000\", \"host\": \"WORKSTATION6\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\Windows\\\\System32\\\\cmd.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\services.exe\", \"command_line\": \"C:"
+      },
+      {
+        "step": 2,
+        "tool": "decode_command",
+        "args": {
+          "command": "SQBmACgAJABQAFMAVgBFAHIAUwBpAE8AbgBUAGEAYgBsAEUALgBQAFMAVgBFAFIAcwBJAE8AbgAuAE0AYQBqAG8AcgAgAC0ARwBFACAA"
+        },
+        "result_preview": "{\"decoded_length\": 1876, \"indicators\": {\"disables_script_block_logging\": true, \"bypasses_amsi_antivirus_scan\": true, \"downloads_from_web\": true, \"runs_downloaded_code\": true, \"contains_nested_base64\": true, \"uses_proxy_credentials\": true}, \"urls_contacted\": [\"http://10.10.10.5\"], \"decoded_preview\": "
+      },
+      {
+        "step": 3,
+        "tool": "ip_reputation",
+        "args": {
+          "ip": "10.10.10.5"
+        },
+        "result_preview": "{\"ip\": \"10.10.10.5\", \"verdict\": \"suspicious\", \"note\": \"Private address but NOT in the company's known network ranges (not a known company asset)\"}"
+      },
+      {
+        "step": 4,
+        "tool": "mitre_lookup",
+        "args": {
+          "behavior": "encoded powerShell command disabling security logging downloading from internet"
+        },
+        "result_preview": "{\"matches\": [{\"id\": \"T1027\", \"name\": \"Obfuscated Files or Information\", \"tactic\": \"Defense Evasion\", \"mitigation\": \"Decode and inspect encoded commands; alert on -enc usage\"}, {\"id\": \"T1059.001\", \"name\": \"Command and Scripting Interpreter: PowerShell\", \"tactic\": \"Execution\", \"mitigation\": \"Constrain"
+      },
+      {
+        "step": 5,
+        "tool": "mitre_lookup",
+        "args": {
+          "behavior": "defense evasion encoded command download from internet"
+        },
+        "result_preview": "{\"matches\": [{\"id\": \"T1027\", \"name\": \"Obfuscated Files or Information\", \"tactic\": \"Defense Evasion\", \"mitigation\": \"Decode and inspect encoded commands; alert on -enc usage\"}, {\"id\": \"T1105\", \"name\": \"Ingress Tool Transfer\", \"tactic\": \"Command and Control\", \"mitigation\": \"Block downloads from untrus"
+      },
+      {
+        "step": 6,
+        "tool": "get_user_context",
+        "args": {
+          "user": "SYSTEM"
+        },
+        "result_preview": "{\"note\": \"User not in directory\", \"directory_note\": \"Lab environment: the dataset does not include real job roles.\"}"
+      },
+      {
+        "step": 7,
+        "tool": "mitre_lookup",
+        "args": {
+          "behavior": "disable security logging AMSI bypass download payload"
+        },
+        "result_preview": "{\"matches\": [{\"id\": \"T1105\", \"name\": \"Ingress Tool Transfer\", \"tactic\": \"Command and Control\", \"mitigation\": \"Block downloads from untrusted hosts\"}, {\"id\": \"T1562.001\", \"name\": \"Impair Defenses: Disable or Modify Tools\", \"tactic\": \"Defense Evasion\", \"mitigation\": \"Protect logging settings; alert wh"
+      },
+      {
+        "step": 8,
+        "tool": "query_logs",
+        "args": {
+          "end": "2020-09-20T16:30:00",
+          "start": "2020-09-20T16:10:00",
+          "source": "process",
+          "text": "cmd.exe",
+          "host": "WORKSTATION6",
+          "limit": 20
+        },
+        "result_preview": "{\"total_matches\": 2, \"showing\": 2, \"events\": [{\"timestamp\": \"2020-09-20 16:16:57.114000\", \"host\": \"WORKSTATION6\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\Windows\\\\System32\\\\cmd.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\services.exe\", \"command_line\": \"C:"
+      },
+      {
+        "step": 9,
+        "tool": "mitre_lookup",
+        "args": {
+          "behavior": "lateral movement privilege escalation"
+        },
+        "result_preview": "{\"matches\": [{\"id\": \"T1021\", \"name\": \"Remote Services\", \"tactic\": \"Lateral Movement\", \"mitigation\": \"Restrict admin protocols, segment network, disable compromised account\"}]}"
+      }
+    ],
+    "seconds": 257.2
+  },
+  {
+    "verdict": "needs_review",
+    "raw": "{\"verdict\": \"true_positive\", \"confidence\": 95, \"title\": \"Malicious service 'Updater' executes encoded PowerShell to disable security controls and download malware\", \"summary\": \"User pgustavo logged in from 172.18.39.5, seconds later the new 'Updater' service was installed on WORKSTATION6 running an encoded PowerShell command that disables script block logging and AMSI, downloads from http://10.10.10.5, and executes downloaded code. This continues the attack chain from ALERT-001.\", \"mitre\": [\"T1027\", \"T1078\", \"T1105\", \"T1543.003\", \"T1569.002\"], \"evidence\": [\"Service 'Updater' installed on WORKSTATION6 by pgustavo at 16:16:58 running %COMSPEC% /C start /b powershell -enc\", \"Decoded command disables ScriptBlockLogging, bypasses AMSI, downloads from http://10.10.10.5, runs downloaded code\", \"Source IP 172.18.39.5 rated internal but attacker used valid user account pgustavo\", \"Connection to ALERT-001: same host, similar encoded PowerShell disabling security controls\", \"User pgustavo is Domain user (lab) with normal host WORKSTATION5\"]}, \"related_to_prior\": \"Continuation of ALERT-001 attack chain on WORKSTATION6 - same user context, different execution method (service vs direct command)\", \"recommended_actions\": [{\"action\": \"Isolate WORKSTATION6 immediately to prevent further malware execution and lateral movement\", \"target\": \"WORKSTATION6\", \"priority\": \"immediate\"}, {\"action\": \"Terminate and remove the malicious 'Updater' service from WORKSTATION6\", \"target\": \"WORKSTATION6\", \"priority\": \"immediate\"}, {\"action\": \"Reset pgustavo's credentials and investigate how credentials were compromised\", \"target\": \"pgustavo account\", \"priority\": \"immediate\"}, {\"action\": \"Block http://10.10.10.5 at perimeter and review all hosts for connections to this IP\", \"target\": \"network perimeter\", \"priority\": \"soon\"}, {\"action\": \"Conduct full forensic analysis of WORKSTATION6 for persistence mechanisms and data exfiltration\", \"target\": \"WORKSTATION6\", \"priority\": \"later\"}]}",
+    "alert_id": "ALERT-002",
+    "steps": 10,
+    "trace": [
+      {
+        "step": 1,
+        "tool": "query_logs",
+        "args": {
+          "start": "2020-09-20T16:15:00",
+          "end": "2020-09-20T16:20:00",
+          "text": "Updater",
+          "limit": 20,
+          "host": "WORKSTATION6"
+        },
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-09-20 16:16:58.214000\", \"host\": \"WORKSTATION6\", \"source\": \"service\", \"event\": \"service_install\", \"user\": \"pgustavo\", \"command_line\": \"%COMSPEC% /C start /b C:\\\\Windows\\\\System32\\\\WindowsPowershell\\\\v1.0\\\\powershell -noP -sta -w 1 -enc"
+      },
+      {
+        "step": 2,
+        "tool": "decode_command",
+        "args": {
+          "command": "SQBmACgAJABQAFMAVgBFAHIAUwBpAE8AbgBUAGEAYgBsAEUALgBQAFMAVgBFAFIAcwBJAE8AbgAuAE0AYQB"
+        },
+        "result_preview": "{\"decoded_length\": 1876, \"indicators\": {\"disables_script_block_logging\": true, \"bypasses_amsi_antivirus_scan\": true, \"downloads_from_web\": true, \"runs_downloaded_code\": true, \"contains_nested_base64\": true, \"uses_proxy_credentials\": true}, \"urls_contacted\": [\"http://10.10.10.5\"], \"decoded_preview\": "
+      },
+      {
+        "step": 3,
+        "tool": "ip_reputation",
+        "args": {
+          "ip": "172.18.39.5"
+        },
+        "result_preview": "{\"ip\": \"172.18.39.5\", \"verdict\": \"internal\", \"note\": \"Inside the company's known network ranges\"}"
+      },
+      {
+        "step": 4,
+        "tool": "get_user_context",
+        "args": {
+          "user": "pgustavo"
+        },
+        "result_preview": "{\"role\": \"Domain user (lab)\", \"normal_hosts\": [\"WORKSTATION5\"], \"admin\": \"unknown\"}"
+      },
+      {
+        "step": 5,
+        "tool": "query_logs",
+        "args": {
+          "text": "encoded",
+          "host": "WORKSTATION6",
+          "end": "2020-09-20T16:16:00",
+          "start": "2020-09-20T16:10:00"
+        },
+        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}"
+      },
+      {
+        "step": 6,
+        "tool": "mitre_lookup",
+        "args": {
+          "behavior": "new service execution command shell"
+        },
+        "result_preview": "{\"matches\": [{\"id\": \"T1543.003\", \"name\": \"Create or Modify System Process: Windows Service\", \"tactic\": \"Persistence / Privilege Escalation\", \"mitigation\": \"Alert on new services, restrict service creation rights\"}, {\"id\": \"T1569.002\", \"name\": \"System Services: Service Execution\", \"tactic\": \"Executio"
+      },
+      {
+        "step": 7,
+        "tool": "query_logs",
+        "args": {
+          "text": "logon",
+          "host": "WORKSTATION6",
+          "start": "2020-09-20T16:10:00",
+          "end": "2020-09-20T16:17:00"
+        },
+        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}"
+      },
+      {
+        "step": 8,
+        "tool": "query_logs",
+        "args": {
+          "text": "172.18.39.5",
+          "host": "WORKSTATION6",
+          "start": "2020-09-20T16:10:00",
+          "end": "2020-09-20T16:20:00"
+        },
+        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}"
+      },
+      {
+        "step": 9,
+        "tool": "mitre_lookup",
+        "args": {
+          "behavior": "encoded power shell download web"
+        },
+        "result_preview": "{\"matches\": [{\"id\": \"T1027\", \"name\": \"Obfuscated Files or Information\", \"tactic\": \"Defense Evasion\", \"mitigation\": \"Decode and inspect encoded commands; alert on -enc usage\"}, {\"id\": \"T1105\", \"name\": \"Ingress Tool Transfer\", \"tactic\": \"Command and Control\", \"mitigation\": \"Block downloads from untrus"
+      }
+    ],
+    "seconds": 71.6
+  },
+  {
+    "verdict": "needs_review",
+    "raw": "Let me analyze all the evidence I've gathered:\n\n1. **Alert Details**: High severity script C2 beacon on WORKSTATION6, SYSTEM user, connected to 10.10.10.5:80 at 2020-09-20 16:17:04\n\n2. **Process Chain**: \n   - cmd.exe (parent: services.exe) launched powershell.exe (parent: cmd.exe) \n   - The PowerShell was launched with `-enc` (encoded command) - this is very suspicious\n   - The encoded command was decoded and shows it's disabling script block logging, bypassing AMSI, downloading from web, running downloaded code\n   - After the encoded PowerShell, there was a connection to 10.10.10.5:80\n   - After the connection, whoami.exe was launched from PowerShell\n\n3. **IP Reputation**: 10.10.10.5 is suspicious - private address but NOT in company's known network ranges (not a known company asset)",
+    "alert_id": "ALERT-003",
+    "steps": 10,
+    "trace": [
+      {
+        "step": 1,
+        "tool": "query_logs",
+        "args": {
+          "start": "2020-09-20T16:10:00",
+          "text": "powershell",
+          "host": "WORKSTATION6",
+          "limit": 30,
+          "end": "2020-09-20T16:30:00"
+        },
+        "result_preview": "{\"total_matches\": 6, \"showing\": 6, \"events\": [{\"timestamp\": \"2020-09-20 16:16:57.114000\", \"host\": \"WORKSTATION6\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\Windows\\\\System32\\\\cmd.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\services.exe\", \"command_line\": \"C:"
+      },
+      {
+        "step": 2,
+        "tool": "decode_command",
+        "args": {
+          "command": "SQBmACgAJABQAFMAVgBFAHIAUwBpAE8AbgBUAGEAYgBsAEUALgBQAFMAVgBFAFIAcwBJAE8AbgAuAE0AYQBqAG8AcgAgAC0ARwBFACAA"
+        },
+        "result_preview": "{\"decoded_length\": 1876, \"indicators\": {\"disables_script_block_logging\": true, \"bypasses_amsi_antivirus_scan\": true, \"downloads_from_web\": true, \"runs_downloaded_code\": true, \"contains_nested_base64\": true, \"uses_proxy_credentials\": true}, \"urls_contacted\": [\"http://10.10.10.5\"], \"decoded_preview\": "
+      },
+      {
+        "step": 3,
+        "tool": "ip_reputation",
+        "args": {
+          "ip": "10.10.10.5"
+        },
+        "result_preview": "{\"ip\": \"10.10.10.5\", \"verdict\": \"suspicious\", \"note\": \"Private address but NOT in the company's known network ranges (not a known company asset)\"}"
+      },
+      {
+        "step": 4,
+        "tool": "mitre_lookup",
+        "args": {
+          "behavior": "powershell beacon C2 encoded command disable security logging"
+        },
+        "result_preview": "{\"matches\": [{\"id\": \"T1027\", \"name\": \"Obfuscated Files or Information\", \"tactic\": \"Defense Evasion\", \"mitigation\": \"Decode and inspect encoded commands; alert on -enc usage\"}, {\"id\": \"T1059.001\", \"name\": \"Command and Scripting Interpreter: PowerShell\", \"tactic\": \"Execution\", \"mitigation\": \"Constrain"
+      },
+      {
+        "step": 5,
+        "tool": "get_user_context",
+        "args": {
+          "user": "SYSTEM"
+        },
+        "result_preview": "{\"note\": \"User not in directory\", \"directory_note\": \"Lab environment: the dataset does not include real job roles.\"}"
+      },
+      {
+        "step": 6,
+        "tool": "mitre_lookup",
+        "args": {
+          "behavior": "C2 beacon over HTTP from Windows PowerShell"
+        },
+        "result_preview": "{\"matches\": [{\"id\": \"T1059.001\", \"name\": \"Command and Scripting Interpreter: PowerShell\", \"tactic\": \"Execution\", \"mitigation\": \"Constrained Language Mode, script block logging, AMSI\"}, {\"id\": \"T1071.001\", \"name\": \"Application Layer Protocol: Web Protocols (C2 over HTTP/S)\", \"tactic\": \"Command and Co"
+      },
+      {
+        "step": 7,
+        "tool": "query_logs",
+        "args": {
+          "limit": 20,
+          "start": "2020-09-20T16:00:00",
+          "host": "WORKSTATION6",
+          "end": "2020-09-20T16:20:00",
+          "text": "encoded"
+        },
+        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}"
+      },
+      {
+        "step": 8,
+        "tool": "mitre_lookup",
+        "args": {
+          "behavior": "valid accounts windows workstation"
+        },
+        "result_preview": "{\"matches\": [{\"id\": \"T1078\", \"name\": \"Valid Accounts\", \"tactic\": \"Initial Access / Persistence\", \"mitigation\": \"Reset credentials, review session activity, enforce MFA\"}]}"
+      },
+      {
+        "step": 9,
+        "tool": "query_logs",
+        "args": {
+          "host": "WORKSTATION6",
+          "end": "2020-09-20T16:25:00",
+          "limit": 10,
+          "start": "2020-09-20T16:15:00",
+          "text": "10.10.10.5"
+        },
+        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}"
+      }
+    ],
+    "seconds": 647.9
+  }
+]

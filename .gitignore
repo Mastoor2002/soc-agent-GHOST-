@@ -1,4 +1,7 @@
 .env
 .venv/
 __pycache__/
-reports/
+# Saved Nemotron results ARE published (the online demo shows them); only the old Week 1 file is not
+reports/incidents.json
+# Scaled benchmark data is rebuilt on demand (large)
+data/scaled/

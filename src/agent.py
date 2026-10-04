@@ -22,7 +22,7 @@ import json
 import os
 import re
 
-from .tools import TOOL_SCHEMAS, Toolbox
+from .tools import TOOL_SCHEMAS, Toolbox, summarize_step
 
 SYSTEM_PROMPT = """You are a senior SOC (Security Operations Center) analyst.
 You receive one alert at a time and must investigate it using your tools before
@@ -256,7 +256,8 @@ def investigate(alert: dict, toolbox: Toolbox, model, prior: list[dict], verbose
             if verbose:
                 print(f"    step {step}: {tc['name']}({tc['arguments']}) -> {result[:90]}...")
             trace.append({"step": step, "tool": tc["name"], "args": tc["arguments"],
-                          "result_preview": result[:300], "result_full": result})
+                          "result_preview": result[:300], "result_full": result,
+                          "summary": summarize_step(tc["name"], tc["arguments"], result)})
             if on_step:
                 on_step(trace[-1])
             messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
