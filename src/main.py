@@ -24,7 +24,7 @@ from .tools import Toolbox
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def score(reports: list[dict], scenario: str) -> None:
+def score(reports: list[dict], scenario: str, alerts: list[dict]) -> None:
     """Compare results to the scenario's answer key. Numbers like these win hackathons."""
     truth = scenarios.load_truth(scenario)
     found = {t for r in reports if r.get("verdict") == "true_positive" for t in r.get("mitre", [])}
@@ -38,6 +38,9 @@ def score(reports: list[dict], scenario: str) -> None:
     unverified = sorted({t for r in reports for t in r.get("unverified_mitre", [])})
     if unverified:
         print(f"Rejected by grounding check: {unverified}  (claimed without evidence)")
+    for b in scenarios.benign_results(truth, alerts, {r["alert_id"]: r for r in reports}):
+        mark = "OK " if b["correct"] else "MISS"
+        print(f"Legit activity [{mark}]:        {b['alert_id']} -> {b['verdict']}  ({b['note'][:70]}...)")
 
 
 def main():
@@ -79,7 +82,7 @@ def main():
             t.pop("result_full", None)
     (out / f"incidents_{args.scenario}.json").write_text(json.dumps(reports, indent=2))
     print(f"Saved {len(reports)} reports -> reports/incidents_{args.scenario}.json")
-    score(reports, args.scenario)
+    score(reports, args.scenario, alerts)
 
 
 if __name__ == "__main__":

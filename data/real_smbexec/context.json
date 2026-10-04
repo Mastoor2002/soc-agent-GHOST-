@@ -22,8 +22,8 @@
   },
   "directory_note": "Lab environment: the dataset does not include real job roles.",
   "chart_note": "Real recordings are short: a few minutes of a busy Windows network.",
-  "title": "Real attack: Empire Invoke-PsExec (OTRF)",
-  "description": "An attacker with a foothold on WORKSTATION5 uses the Empire framework to move to WORKSTATION6 by remotely creating and starting a Windows service over RPC/TCP.",
-  "otrf_id": "SDWIN-190518210652",
-  "raw_events": 4348
+  "title": "Real attack: Empire Invoke-SMBExec (OTRF)",
+  "description": "A PsExec cousin: the attacker remotely creates and starts a service on WORKSTATION6, this time through SMB named pipes instead of plain RPC over TCP.",
+  "otrf_id": "SDWIN-190518210125",
+  "raw_events": 7504
 }

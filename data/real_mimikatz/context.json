@@ -22,8 +22,8 @@
   },
   "directory_note": "Lab environment: the dataset does not include real job roles.",
   "chart_note": "Real recordings are short: a few minutes of a busy Windows network.",
-  "title": "Real attack: Empire Invoke-PsExec (OTRF)",
-  "description": "An attacker with a foothold on WORKSTATION5 uses the Empire framework to move to WORKSTATION6 by remotely creating and starting a Windows service over RPC/TCP.",
-  "otrf_id": "SDWIN-190518210652",
-  "raw_events": 4348
+  "title": "Real attack: Mimikatz LogonPasswords (OTRF)",
+  "description": "Credential theft: from WORKSTATION5 the attacker runs Mimikatz through Empire to read passwords and hashes out of the memory of lsass.exe, the Windows login process.",
+  "otrf_id": "SDWIN-190518202151",
+  "raw_events": 6026
 }

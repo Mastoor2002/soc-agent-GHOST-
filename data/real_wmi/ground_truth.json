@@ -1,0 +1,9 @@
+[
+  {
+    "stage": "remote_execution",
+    "mitre": [
+      "T1047"
+    ],
+    "note": "Official OTRF label for SDWIN-200921001437"
+  }
+]

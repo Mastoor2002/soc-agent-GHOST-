@@ -41,6 +41,20 @@ def load_truth(name: str) -> list[dict]:
 def technique_recall(truth: list[dict], found: set[str]) -> tuple[set, set]:
     """Which expected techniques were found. A sub-technique counts for its parent:
     finding T1021.002 (SMB/Admin Shares) satisfies an expected T1021 (Remote Services)."""
-    expected = {t for stage in truth for t in stage["mitre"]}
+    expected = {t for stage in truth for t in stage.get("mitre", [])}
     hit = {e for e in expected if any(f == e or f.startswith(e + ".") for f in found)}
     return expected, hit
+
+
+def benign_results(truth: list[dict], alerts: list[dict], reports: dict) -> list[dict]:
+    """For each known-legitimate activity in the answer key: did a detector flag it,
+    and if so, did the agent correctly dismiss it as a false positive?"""
+    out = []
+    for item in [t for t in truth if t.get("benign")]:
+        m = item["match"]
+        for a in alerts:
+            if a["type"] == m["type"] and m["process"].lower() in str(a.get("process", "")).lower():
+                verdict = reports.get(a["id"], {}).get("verdict")
+                out.append({"alert_id": a["id"], "note": item["note"], "verdict": verdict,
+                            "correct": verdict in ("false_positive", "needs_review")})
+    return out

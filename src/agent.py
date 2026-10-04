@@ -35,6 +35,9 @@ concluding. Work like a careful human analyst:
 3. Check every IP that isn't the local machine with ip_reputation.
 4. Use get_user_context to judge whether behavior is unusual for that person.
 5. Map the behavior to MITRE ATT&CK with mitre_lookup.
+   Not every alert is an attack: legitimate software (backup, antivirus, cloud and
+   diagnostics agents) can trip detectors. If the evidence shows legitimate activity,
+   say false_positive — a wrong "attack" verdict wastes analysts' time too.
 6. Connect this alert to any earlier findings you are given (attack chains matter).
 
 ATT&CK guidance:
@@ -121,6 +124,13 @@ class MockModel:
                 ("query_logs", {"host": alert.get("host"), "source": "process"}),
                 ("decode_command", {"command": "powershell  -noP -sta -w 1 -enc"}),
                 ("mitre_lookup", {"behavior": "encoded powershell amsi"})],
+            "remote_wmi_execution": [
+                ("query_logs", {"host": alert.get("host"), "source": "process"}),
+                ("get_user_context", {"user": alert.get("user") or ""}),
+                ("mitre_lookup", {"behavior": "wmi remote execution"})],
+            "lsass_memory_access": [
+                ("query_logs", {"host": alert.get("host"), "source": "process_access"}),
+                ("mitre_lookup", {"behavior": "lsass credential dump"})],
             "script_c2_beacon": [
                 ("query_logs", {"ip": alert.get("dst_ip")}),
                 ("ip_reputation", {"ip": alert.get("dst_ip")}),
@@ -135,9 +145,12 @@ class MockModel:
                  "exfiltration": ["T1048"],
                  "remote_service_execution": ["T1021.002", "T1543.003", "T1569.002"],
                  "encoded_powershell": ["T1059.001", "T1027", "T1562.001"],
-                 "script_c2_beacon": ["T1071.001", "T1105"]}.get(alert["type"], [])
+                 "script_c2_beacon": ["T1071.001", "T1105"],
+                 "remote_wmi_execution": ["T1047"],
+                 "lsass_memory_access": ["T1003.001"]}.get(alert["type"], [])
         return {"content": json.dumps({
-            "verdict": "true_positive", "confidence": 90,
+            "verdict": "needs_review" if alert.get("severity") == "medium" else "true_positive",
+            "confidence": 90,
             "title": f"[MOCK] {alert['type'].replace('_', ' ').title()}",
             "summary": f"[MOCK] {alert['summary']}. Replace --mock with a real API key to "
                        f"see Nemotron reason over the tool results.",
@@ -194,9 +207,11 @@ def ground_mitre(report: dict, alert: dict, trace: list[dict]) -> dict:
     probably recalled from memory (a hallucination), so it is set aside as
     'unverified' and doesn't count toward the score."""
     seen = set(alert.get("rule_tags", []))
+    seen |= set(TECHNIQUE_ID.findall(SYSTEM_PROMPT))  # techniques our own guidance names
     for t in trace:
         seen |= set(TECHNIQUE_ID.findall(t.get("result_full", t.get("result_preview", ""))))
-    claimed = [m for m in report.get("mitre", []) if isinstance(m, str)]
+    seen |= {t.split(".")[0] for t in seen}  # a confirmed T1059.001 supports its parent T1059
+    claimed = [m.strip() for m in report.get("mitre", []) if isinstance(m, str)]
     report["mitre"] = [m for m in claimed if m in seen]
     unverified = [m for m in claimed if m not in seen]
     if unverified:

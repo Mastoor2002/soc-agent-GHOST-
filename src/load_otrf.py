@@ -17,6 +17,7 @@ The Windows events we keep (the rest is noise for our purposes):
   4688 / Sysmon 1          a process started (with command)   -> source "process"
   7045 / 4697              a new Windows service was installed-> source "service"
   Sysmon 3                 a network connection was made      -> source "network"
+  Sysmon 10 (to lsass.exe) a program opened the password store's memory -> "process_access"
 Everything else is kept as source "other" — the haystack the attack hides in.
 
 Run:  python -m src.load_otrf
@@ -30,34 +31,60 @@ from pathlib import Path
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 RAW = "https://raw.githubusercontent.com/OTRF/Security-Datasets/master/datasets/atomic/windows"
 
-# Each entry: dataset id, download URL, official ATT&CK label, and what the lab looked like.
-DATASETS = {
-    "real_psexec": {
-        "otrf_id": "SDWIN-190518210652",
-        "url": f"{RAW}/lateral_movement/host/empire_psexec_dcerpc_tcp_svcctl.zip",
-        "context": {
-            "title": "Real attack: Empire Invoke-PsExec (OTRF)",
-            "description": "Recorded in a lab Windows domain by the OTRF Security Datasets "
-                           "project. An attacker with a foothold on WORKSTATION5 uses the Empire "
-                           "framework to move to WORKSTATION6. Thousands of normal background "
-                           "events surround the attack.",
-            "chart_note": "Real recordings are short: about two minutes of a busy Windows network.",
-            "source_url": "https://github.com/OTRF/Security-Datasets",
-            # The lab network ("theshire.local"): workstations 172.18.39.x, servers 172.18.38.x
-            "known_subnets": ["172.18.0.0/16"],
-            "threat_intel": {},
-            "users": {
-                "pgustavo": {"role": "Domain user (lab)", "normal_hosts": ["WORKSTATION5"],
-                             "admin": "unknown"},
-                "sbeavers": {"role": "Domain user (lab)", "normal_hosts": ["WORKSTATION6"],
-                             "admin": "unknown"},
-            },
-            "directory_note": "Lab environment: the dataset does not include real job roles.",
-        },
-        # Ground truth = the dataset's OFFICIAL label, not our opinion.
-        "truth": [{"stage": "lateral_movement", "mitre": ["T1021"],
-                   "note": "Official OTRF label for SDWIN-190518210652 (Empire Invoke PsExec)"}],
+# All OTRF Windows datasets come from the same lab domain ("theshire.local"):
+# workstations 172.18.39.x, servers 172.18.38.x, attacker server outside that range.
+LAB = {
+    "source_url": "https://github.com/OTRF/Security-Datasets",
+    "known_subnets": ["172.18.0.0/16"],
+    "threat_intel": {},
+    "users": {
+        "pgustavo": {"role": "Domain user (lab)", "normal_hosts": ["WORKSTATION5"], "admin": "unknown"},
+        "sbeavers": {"role": "Domain user (lab)", "normal_hosts": ["WORKSTATION6"], "admin": "unknown"},
     },
+    "directory_note": "Lab environment: the dataset does not include real job roles.",
+    "chart_note": "Real recordings are short: a few minutes of a busy Windows network.",
+}
+
+
+def otrf(otrf_id, path, title, description, technique, label_name, benign=()):
+    """One dataset entry. Ground truth = the dataset's OFFICIAL label, not our opinion.
+    `benign` lists legitimate activity that a detector may flag: the agent is expected
+    to dismiss it as a false positive."""
+    return {"otrf_id": otrf_id, "url": f"{RAW}/{path}",
+            "context": {**LAB, "title": title, "description": description},
+            "truth": [{"stage": label_name, "mitre": [technique],
+                       "note": f"Official OTRF label for {otrf_id}"}] + list(benign)}
+
+
+DATASETS = {
+    "real_psexec": otrf(
+        "SDWIN-190518210652", "lateral_movement/host/empire_psexec_dcerpc_tcp_svcctl.zip",
+        "Real attack: Empire Invoke-PsExec (OTRF)",
+        "An attacker with a foothold on WORKSTATION5 uses the Empire framework to move to "
+        "WORKSTATION6 by remotely creating and starting a Windows service over RPC/TCP.",
+        "T1021", "lateral_movement"),
+    "real_smbexec": otrf(
+        "SDWIN-190518210125", "lateral_movement/host/empire_smbexec_dcerpc_smb_svcctl.zip",
+        "Real attack: Empire Invoke-SMBExec (OTRF)",
+        "A PsExec cousin: the attacker remotely creates and starts a service on WORKSTATION6, "
+        "this time through SMB named pipes instead of plain RPC over TCP.",
+        "T1021.002", "lateral_movement",
+        benign=[{"stage": "benign", "benign": True,
+                 "match": {"type": "lsass_memory_access", "process": "CollectGuestLogs.exe"},
+                 "note": "Microsoft Azure guest agent (C:\\WindowsAzure\\GuestAgent...) reading "
+                         "lsass while collecting diagnostic logs: legitimate, should be dismissed"}]),
+    "real_wmi": otrf(
+        "SDWIN-200921001437", "lateral_movement/host/empire_wmi_dcerpc_wmi_IWbemServices_ExecMethod.zip",
+        "Real attack: Empire Invoke-WMI (OTRF)",
+        "Lateral movement through a different Windows feature: the attacker uses WMI "
+        "(Win32_Process.Create) to run code on another machine. No service is created.",
+        "T1047", "remote_execution"),
+    "real_mimikatz": otrf(
+        "SDWIN-190518202151", "credential_access/host/empire_mimikatz_logonpasswords.zip",
+        "Real attack: Mimikatz LogonPasswords (OTRF)",
+        "Credential theft: from WORKSTATION5 the attacker runs Mimikatz through Empire to read "
+        "passwords and hashes out of the memory of lsass.exe, the Windows login process.",
+        "T1003.001", "credential_dumping"),
 }
 
 
@@ -115,6 +142,13 @@ def normalize(e: dict) -> dict | None:
                 "src_ip": e.get("SourceIp"), "dst_ip": e.get("DestinationIp"),
                 "dst_port": int(e["DestinationPort"]) if e.get("DestinationPort") else None}
 
+    # A program opening lsass.exe — the process holding logged-in users' passwords/hashes
+    if "sysmon" in channel and eid == 10 and "lsass.exe" in str(e.get("TargetImage", "")).lower():
+        return {**base, "source": "process_access", "event": "open_process",
+                "user": clean_user(e.get("SourceUser")), "process": e.get("SourceImage"),
+                "target_process": e.get("TargetImage"), "granted_access": e.get("GrantedAccess"),
+                "call_trace": str(e.get("CallTrace", ""))[:400]}
+
     # Background noise: registry edits, DLL loads, PowerShell engine events... Kept so
     # detection scans the full haystack, but only a few fields (no huge payloads).
     return {**base, "source": "other", "event": f"{e.get('Channel')} {eid}",
@@ -151,17 +185,20 @@ def load(name: str) -> None:
         if member.endswith(".json"):
             raw_lines += z.read(member).decode("utf-8").splitlines()
 
-    events, seen = [], set()
+    from datetime import datetime
+    events, services = [], []
     for line in raw_lines:
         n = normalize(json.loads(line))
         if not n:
             continue
-        # 7045 and 4697 both describe the same service install — keep one
-        key = (n["source"], n["host"], n.get("service_name"), n["timestamp"][:19]) \
-            if n["source"] == "service" else None
-        if key and key in seen:
-            continue
-        seen.add(key)
+        # 7045 and 4697 both describe the same service install (a fraction of a second
+        # apart, sometimes across a second boundary) — keep one
+        if n["source"] == "service":
+            t = datetime.fromisoformat(n["timestamp"])
+            if any(h == n["host"] and name == n.get("service_name") and abs((t - t0).total_seconds()) <= 5
+                   for h, name, t0 in services):
+                continue
+            services.append((n["host"], n.get("service_name"), t))
         events.append({k: v for k, v in n.items() if v not in (None, "", "-")})
     events = dedupe_processes(events)
     events.sort(key=lambda e: e["timestamp"])
@@ -180,5 +217,6 @@ def load(name: str) -> None:
 
 
 if __name__ == "__main__":
-    for name in DATASETS:
+    import sys
+    for name in (sys.argv[1:] or DATASETS):
         load(name)

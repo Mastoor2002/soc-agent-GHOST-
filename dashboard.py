@@ -189,6 +189,9 @@ st.subheader("Alerts")
 if not reports and not run:
     st.info("Press **▶ Run live investigation** in the sidebar to watch the agent work.")
 
+benign = {b["alert_id"]: b for b in scenarios.benign_results(
+    scenarios.load_truth(scenario), alerts, ss.reports)}
+
 for a in alerts:
     r = ss.reports.get(a["id"])
     with st.container(border=True):
@@ -204,6 +207,11 @@ for a in alerts:
         if isinstance(conf, (int, float)):
             top[1].progress(min(int(conf), 100) / 100, text=f"Confidence {conf}%")
 
+        if a["id"] in benign:
+            b = benign[a["id"]]
+            (st.success if b["correct"] else st.error)(
+                f"Answer key: legitimate activity. {b['note']} — GHOST said "
+                f"**{r.get('verdict')}** ({'correct' if b['correct'] else 'wrong'})")
         st.markdown(f"**{r.get('title', '')}**")
         st.write(r.get("summary", r.get("raw", "")))
         if r.get("related_to_prior"):

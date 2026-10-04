@@ -1,0 +1,9 @@
+[
+  {
+    "stage": "credential_dumping",
+    "mitre": [
+      "T1003.001"
+    ],
+    "note": "Official OTRF label for SDWIN-190518202151"
+  }
+]

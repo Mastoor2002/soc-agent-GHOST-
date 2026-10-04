@@ -57,6 +57,12 @@ MITRE = {
     "T1071.001": {"name": "Application Layer Protocol: Web Protocols (C2 over HTTP/S)",
                   "tactic": "Command and Control",
                   "mitigation": "Block unknown destinations; proxy and inspect outbound web traffic"},
+    "T1047": {"name": "Windows Management Instrumentation (WMI) remote execution",
+              "tactic": "Execution / Lateral Movement",
+              "mitigation": "Restrict remote WMI/DCOM, alert on shells spawned by wmiprvse.exe"},
+    "T1003.001": {"name": "OS Credential Dumping: LSASS Memory (e.g. Mimikatz)",
+                  "tactic": "Credential Access",
+                  "mitigation": "Enable LSA Protection/Credential Guard; reset exposed passwords"},
     "T1105": {"name": "Ingress Tool Transfer", "tactic": "Command and Control",
               "mitigation": "Block downloads from untrusted hosts"},
     "T1033": {"name": "System Owner/User Discovery (e.g. whoami)", "tactic": "Discovery",
@@ -79,7 +85,10 @@ KEYWORDS = {"brute": "T1110", "password": "T1110", "failed login": "T1110",
             "script block logging": "T1562.001",
             "c2": "T1071.001", "command and control": "T1071.001", "beacon": "T1071.001",
             "callback": "T1071.001", "download": "T1105", "stager": "T1105",
-            "whoami": "T1033", "discovery": "T1033"}
+            "whoami": "T1033", "discovery": "T1033",
+            "wmi": "T1047", "wmiprvse": "T1047", "win32_process": "T1047",
+            "lsass": "T1003.001", "credential dump": "T1003.001", "mimikatz": "T1003.001",
+            "password hash": "T1003.001", "memory read": "T1003.001"}
 
 # Columns that are mostly noise for the agent — dropped from query results
 HIDE = {"raw_event_id"}
@@ -247,7 +256,8 @@ TOOL_SCHEMAS = [
     {"type": "function", "function": {
         "name": "query_logs",
         "description": "Search security logs. Filters combine with AND. `source` is one of: "
-                       "auth (logons), firewall, network, process, service (or 'other' for "
+                       "auth (logons), firewall, network, process, service, process_access "
+                       "(a program opening another, e.g. lsass.exe) (or 'other' for "
                        "low-level background events, hidden by default). `text` searches every "
                        "field (users, IPs, commands, service names). Long fields are truncated.",
         "parameters": {"type": "object", "properties": {

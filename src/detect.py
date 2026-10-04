@@ -30,7 +30,8 @@ from .replay import LOG_FILE
 # so detectors and tools never crash on a missing column.
 COLUMNS = ["timestamp", "source", "event", "outcome", "action", "user", "host",
            "src_ip", "dst_ip", "dst_port", "method", "bytes_out",
-           "process", "parent_process", "command_line", "service_name"]
+           "process", "parent_process", "command_line", "service_name",
+           "target_process", "granted_access", "call_trace"]
 
 
 def load_logs(path=LOG_FILE) -> pd.DataFrame:
@@ -204,6 +205,69 @@ def detect_script_beacon(df: pd.DataFrame) -> list[dict]:
     return alerts
 
 
+def _network_logon_near(df, host, when, window_s=120):
+    """Successful remote (network) logons on `host` within `window_s` seconds of `when`."""
+    logons = df[(df.source == "auth") & (df.outcome == "success") & (df.method == "network")
+                & (df.host == host) & ~df.src_ip.isin(["::1", "127.0.0.1", "-"])]
+    return logons[(logons.timestamp - when).abs().dt.total_seconds() <= window_s]
+
+
+def detect_wmi_remote_exec(df: pd.DataFrame) -> list[dict]:
+    """WMI lateral movement: wmiprvse.exe (the Windows WMI service) launches a command
+    shell, and someone logged in to that machine over the network at the same moment.
+    Admin tools rarely spawn shells through WMI; attack frameworks do it constantly."""
+    procs = df[df.source == "process"]
+    if procs.empty:
+        return []
+    procs = procs[(procs.parent_process.apply(_basename) == "wmiprvse.exe")
+                  & procs.process.apply(_basename).isin(SHELLS)]
+    alerts = []
+    for host, g in procs.groupby("host"):
+        first = g.iloc[0]
+        near = _network_logon_near(df, host, first.timestamp)
+        who = near.iloc[0] if len(near) else None
+        alerts.append({
+            "type": "remote_wmi_execution",
+            "severity": "critical" if who is not None else "high",
+            "time": str(first.timestamp), "host": host,
+            "user": who.user if who is not None else first.user,
+            "src_ip": who.src_ip if who is not None else None,
+            "summary": f"WMI (wmiprvse.exe) launched {_basename(first.process)} on {host} as "
+                       f"{first.user}" + (f", at the same moment as a network logon by {who.user} "
+                                           f"from {who.src_ip}" if who is not None else ""),
+        })
+    return alerts
+
+
+def detect_lsass_access(df: pd.DataFrame) -> list[dict]:
+    """Credential dumping: a program opens lsass.exe (which holds logged-in users'
+    password hashes) with permission to READ ITS MEMORY (access bit 0x10) — exactly what
+    Mimikatz does. Some legitimate tools (antivirus, diagnostics agents) do this too, so:
+      critical = a script engine/shell, or code running from memory with no file behind
+                 it ('UNKNOWN' in the call trace) — classic in-memory Mimikatz
+      medium   = any other program: worth a look, often legitimate"""
+    acc = df[(df.source == "process_access")
+             & df.target_process.astype(str).str.lower().str.endswith("lsass.exe")]
+    if acc.empty:  # this dataset has no lsass access events at all
+        return []
+    acc = acc[acc.granted_access.apply(lambda a: bool(int(str(a), 16) & 0x10) if a else False)]
+    alerts = []
+    for (host, proc), g in acc.groupby(["host", "process"]):
+        first = g.iloc[0]
+        from_memory = "UNKNOWN" in str(first.call_trace)
+        scripted = _basename(proc) in SHELLS
+        alerts.append({
+            "type": "lsass_memory_access",
+            "severity": "critical" if (from_memory or scripted) else "medium",
+            "time": str(first.timestamp), "host": host, "user": first.user,
+            "process": proc, "granted_access": first.granted_access,
+            "summary": f"{_basename(proc)} on {host} opened lsass.exe with memory-read access "
+                       f"({first.granted_access})"
+                       + (" from code with no file on disk (UNKNOWN in call trace)" if from_memory else ""),
+        })
+    return alerts
+
+
 # Like real detection rules (e.g. Sigma), each rule is tagged with the ATT&CK
 # techniques it was written to catch. The agent treats these as HYPOTHESES:
 # it must confirm them with evidence, drop the wrong ones, and add what it finds.
@@ -212,10 +276,13 @@ RULE_TAGS = {'brute_force': ['T1110'],
              'exfiltration': ['T1048'],
              'remote_service_execution': ['T1021.002', 'T1543.003', 'T1569.002'],
              'encoded_powershell': ['T1059.001', 'T1027'],
-             'script_c2_beacon': ['T1071.001']}
+             'script_c2_beacon': ['T1071.001'],
+             'remote_wmi_execution': ['T1047'],
+             'lsass_memory_access': ['T1003.001']}
 
 DETECTORS = [detect_brute_force, detect_lateral_movement, detect_exfiltration,
-             detect_remote_service_exec, detect_encoded_powershell, detect_script_beacon]
+             detect_remote_service_exec, detect_encoded_powershell, detect_script_beacon,
+             detect_wmi_remote_exec, detect_lsass_access]
 
 
 def run_all(df: pd.DataFrame) -> list[dict]:

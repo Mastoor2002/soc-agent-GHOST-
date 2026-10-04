@@ -45,8 +45,23 @@ python -m src.main --scenario real_psexec   # now the real Nemotron investigates
 
 | Scenario | Events | What's hidden in it | Answer key |
 |---|---|---|---|
-| `synthetic` | 1,270 | VPN brute force → lateral movement → 2.5 GB exfiltration, plus a false-positive trap (big internal backup) | 4 MITRE techniques we planted |
-| `real_psexec` | 4,335 real Windows events | Empire **Invoke-PsExec**: remote logon → fake "Updater" service → encoded PowerShell stager → callback to the attacker's server | Official OTRF label **T1021** (dataset SDWIN-190518210652) |
+| `synthetic` | 1,270 | VPN brute force → lateral movement → 2.5 GB exfiltration, plus a false-positive trap (big internal backup) | 4 techniques we planted |
+| `real_psexec` | 4,335 | Empire **Invoke-PsExec**: remote logon → fake "Updater" service → encoded PowerShell stager → callback | OTRF label **T1021** |
+| `real_smbexec` | 7,489 | Empire **Invoke-SMBExec**: same idea over SMB named pipes. Also contains Azure's legitimate guest agent reading lsass memory, which GHOST must *not* call an attack | OTRF label **T1021.002** + 1 legitimate activity |
+| `real_wmi` | 6,352 | Empire **Invoke-WMI**: code run remotely through WMI, with no service created | OTRF label **T1047** |
+| `real_mimikatz` | 6,015 | **Mimikatz** reading passwords out of lsass.exe memory | OTRF label **T1003.001** |
+
+Real scenarios come from the [OTRF Security Datasets](https://github.com/OTRF/Security-Datasets): attacks run with real tools in a lab Windows domain. The answer key is each dataset's official label, not ours.
+
+## Benchmark
+
+```bash
+python -m src.benchmark                 # detection only, instant
+python -m src.benchmark --agent nim     # + Nemotron investigating every alert
+```
+Writes `reports/benchmark.md`, a results table across all scenarios.
+
+**Honest history:** when we first ran the detectors built for PsExec on the three new real attacks, they caught SMBExec (a variant) unchanged, caught only the side effects of the WMI attack, and **missed the Mimikatz password theft entirely**. That's why the WMI and LSASS detectors exist.
 
 Each scenario is a folder in `data/` with `logs.jsonl`, `ground_truth.json` (never read by detectors or the agent), and `context.json` (company IP ranges, employee directory, threat intel).
 
@@ -69,11 +84,12 @@ Every file starts with a "WHY" comment explaining the concept. Read them in orde
 | 1b | `src/load_otrf.py` | Real Windows event logs, and *normalizing* them into one schema |
 | 1c | `src/scenarios.py` | Organizing test cases, and fair scoring against an answer key |
 | 2 | `src/replay.py` | Streaming data with Python generators (`yield`) |
-| 3 | `src/detect.py` | Detection engineering: turning logs into alerts with pandas (6 detectors) |
+| 3 | `src/detect.py` | Detection engineering: turning logs into alerts with pandas (8 detectors) |
 | 4 | `src/tools.py` | **Tool calling**: how an LLM "does things" safely, including decoding hidden PowerShell |
 | 5 | `src/agent.py` | **The agent loop**: the core pattern behind every AI agent |
 | 6 | `src/main.py` | Wiring it together, plus scoring against the answer key |
 | 7 | `dashboard.py` | Streamlit web dashboard: live investigation, attack chain, human approval |
+| 8 | `src/benchmark.py` | Evaluating a security tool across many attacks: coverage *and* false positives |
 
 **Try this:** run individual steps on their own (`python -m src.detect`, `python -m src.replay`) and change the thresholds in `detect.py` to see what happens.
 
@@ -116,7 +132,8 @@ python -m cudf.pandas -m src.main
 - [x] **Week 1: Foundation.** Data, replay, detection, tools, agent loop, scoring *(this starter)*
 - [x] **Real agent.** Nemotron via NIM; prompt tuned from 2/4 to 4/4 on the synthetic attack
 - [x] **Real data.** OTRF Empire PsExec recording, with Windows log normalization, 3 new detectors, and a PowerShell decoder tool
-- [ ] **More real data.** Add more OTRF recordings (credential dumping, WMI lateral movement) and measure false positives across all of them
+- [x] **More real data.** 4 OTRF recordings (PsExec, SMBExec, WMI, Mimikatz), WMI and LSASS detectors, a real-world false-positive check, and a benchmark across all scenarios
+- [x] **Guardrails.** Self-correction for unreadable reports; grounding check that rejects techniques the AI claims without evidence
 - [ ] **Week 3: GPU proof.** Scale logs to millions of rows; benchmark pandas (CPU) vs `cudf.pandas` (GPU) on Nebius
 - [ ] **Week 3: RAG.** Replace the mini MITRE table with vector search over the full ATT&CK dataset
 - [x] **Dashboard.** Live investigation view, attack chain, human-approved actions *(done early)*
