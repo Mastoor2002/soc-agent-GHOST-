@@ -231,8 +231,10 @@ for a in alerts:
                 f"**{r.get('verdict')}** ({'correct' if b['correct'] else 'wrong'})")
         st.markdown(f"**{r.get('title', '')}**")
         st.write(r.get("summary", r.get("raw", "")))
-        if r.get("related_to_prior"):
-            st.caption(f"🔗 Linked to earlier alerts: {r['related_to_prior']}")
+        link = str(r.get("related_to_prior") or "").strip()
+        empty = ("null", "none", "n/a", "no ", "not ", "first alert")  # models write these as text
+        if link and not link.lower().startswith(empty) and "is the first al" not in link.lower():
+            st.caption(f"🔗 Linked to earlier alerts: {link}")
 
         left, right = st.columns(2)
         with left:

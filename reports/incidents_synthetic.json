@@ -2,37 +2,38 @@
   {
     "verdict": "true_positive",
     "confidence": 95,
-    "title": "Brute force attack on jsmith VPN account from malicious Tor exit node",
-    "summary": "IP 185.220.101.47 performed 37 failed VPN login attempts against user jsmith within 10 minutes, then successfully authenticated. The source IP is a known Tor exit node with 412 reports for credential stuffing. User jsmith is a Marketing Coordinator who does not work remotely, making this anomalous behavior.",
+    "title": "Brute force attack from malicious Tor exit node leads to successful VPN login",
+    "summary": "IP 185.220.101.47 (a known malicious Tor exit node with 412 reports for credential stuffing) conducted 37 failed VPN login attempts against user jsmith within 10 minutes, then successfully authenticated at 02:18:24. User jsmith is a Marketing Coordinator who normally works from WS-07/FS-01 and does not work remotely, making this anomalous behavior.",
     "mitre": [
       "T1110",
       "T1078"
     ],
     "evidence": [
-      "37 failed VPN login attempts from 185.220.101.47 within 10 minutes followed by successful login at 02:18:24",
-      "IP 185.220.101.47 rated malicious with tags 'tor-exit-node' and 'credential-stuffing', 412 reports",
-      "User jsmith is Marketing Coordinator, works_remote:false, accessing VPN from unexpected location"
+      "38 auth events from 185.220.101.47 targeting jsmith: 37 failures followed by 1 success at 02:18:24",
+      "IP reputation: malicious, tagged as tor-exit-node and credential-stuffing, 412 reports",
+      "User context: jsmith is Marketing Coordinator, normally uses WS-07/FS-01, does not work remotely - successful VPN login from unusual location/host is suspicious",
+      "37 failures in ~4 minutes followed by success is classic brute force pattern"
     ],
-    "related_to_prior": "none yet",
+    "related_to_prior": null,
     "recommended_actions": [
       {
-        "action": "Block source IP 185.220.101.47 at perimeter firewall",
-        "target": "firewall",
+        "action": "Block source IP 185.220.101.47 at firewall and VPN gateway",
+        "target": "network-boundary",
         "priority": "immediate"
       },
       {
-        "action": "Force password reset for jsmith account",
-        "target": "user account",
+        "action": "Reset credentials for user jsmith and enforce MFA enrollment",
+        "target": "identity-management",
         "priority": "immediate"
       },
       {
-        "action": "Enable MFA for jsmith and all user accounts",
-        "target": "identity management",
-        "priority": "immediate"
+        "action": "Review all VPN login activity for jsmith across other time periods for potential compromise",
+        "target": "identity-management",
+        "priority": "soon"
       },
       {
-        "action": "Investigate jsmith's other sessions for lateral movement",
-        "target": "endpoint",
+        "action": "Investigate whether other users were targeted from same IP during same timeframe",
+        "target": "log-analysis",
         "priority": "soon"
       }
     ],
@@ -85,7 +86,7 @@
         "step": 5,
         "tool": "mitre_lookup",
         "args": {
-          "behavior": "brute force VPN login"
+          "behavior": "brute force VPN login, successful authentication after failures"
         },
         "result_preview": "{\"matches\": [{\"id\": \"T1078\", \"name\": \"Valid Accounts\", \"tactic\": \"Initial Access / Persistence\", \"mitigation\": \"Reset credentials, review session activity, enforce MFA\"}, {\"id\": \"T1110\", \"name\": \"Brute Force\", \"tactic\": \"Credential Access\", \"mitigation\": \"Enforce MFA, account lockout, block source I",
         "summary": "Matched T1078 Valid Accounts, T1110 Brute Force"
@@ -136,6 +137,7 @@
         "summary": "0 matching events (text jsmith, source other)"
       }
     ],
+    "seconds": 9.9,
     "model": "nvidia/Nemotron-3_5-Lightning",
     "provider": "Nebius Token Factory",
     "run_date": "2026-10-05"
@@ -143,46 +145,40 @@
   {
     "verdict": "true_positive",
     "confidence": 95,
-    "title": "jsmith account compromised - lateral movement across 4 hosts",
-    "summary": "jsmith's account was compromised via brute force (ALERT-001) from a Tor exit node, then used to successfully log into VPN and laterally move to DB-01, DC-01, FS-01, and WS-14 within 30 minutes from internal IP 10.0.1.107. This confirms an attack chain: initial access via valid accounts followed by remote service lateral movement.",
+    "title": "jsmith account lateral movement after brute force VPN compromise",
+    "summary": "jsmith's account was compromised via brute force from Tor exit node 185.220.101.47 (ALERT-001), successfully logged into VPN at 02:18:24, then rapidly pivoted to 4 hosts (WS-14, FS-01, DC-01, DB-01) within 11 minutes using valid credentials. This continues the attack chain from the prior brute force alert.",
     "mitre": [
       "T1078",
       "T1021"
     ],
     "evidence": [
-      "ALERT-001: Brute force attack on jsmith VPN account from malicious Tor exit node (185.220.101.47)",
-      "Multiple failed VPN login attempts from Tor node at 02:14-02:18, succeeded at 02:18:24",
-      "Successful logins to WS-14, DB-01, FS-01, DC-01 all from internal IP 10.0.1.107 between 02:24-02:35",
-      "User context: jsmith is Marketing Coordinator, works_remote:false, normal hosts: WS-07/FS-01 only - this behavior is highly unusual",
-      "IP 10.0.1.107 verified as internal company network range",
-      "Attack chain connects: brute force \u2192 valid credentials \u2192 VPN login \u2192 lateral movement across 4 hosts"
+      "jsmith had 25 failed VPN login attempts from Tor exit node 185.220.101.47 starting at 02:14:00",
+      "Successful VPN login at 02:18:24 from same malicious IP",
+      "Lateral movement to WS-14 at 02:24:24, FS-01 at 02:31:24, DC-01 at 02:35:24, DB-01 at 02:27:24 within 30-minute window",
+      "User context shows jsmith is Marketing Coordinator with normal hosts WS-07/FS-01, no remote work expected",
+      "IP 10.0.1.107 used for lateral hops is internal network range"
     ],
-    "related_to_prior": "ALERT-001 - this is the lateral movement phase following the successful brute force login of jsmith's VPN account",
+    "related_to_prior": "Direct continuation of ALERT-001: same attacker (Tor exit node 185.220.101.47), same victim account (jsmith), attack chain progressed from brute force VPN breach to lateral movement across enterprise hosts",
     "recommended_actions": [
       {
-        "action": "isolate compromised jsmith account and force password reset",
+        "action": "Isolate WS-14, FS-01, DC-01, DB-01 from network to contain lateral movement",
+        "target": "All compromised hosts",
+        "priority": "immediate"
+      },
+      {
+        "action": "Reset jsmith's credentials and force MFA re-enrollment",
         "target": "jsmith account",
         "priority": "immediate"
       },
       {
-        "action": "investigate all host activity from 10.0.1.107 during 02:24-02:35 timeframe",
-        "target": "DB-01, DC-01, FS-01, WS-14",
-        "priority": "immediate"
-      },
-      {
-        "action": "check for persistence mechanisms (scheduled tasks, services, startup items) on affected hosts",
-        "target": "DB-01, DC-01, FS-01, WS-14",
+        "action": "Investigate IP 10.0.1.107 for additional compromised systems or persistence mechanisms",
+        "target": "Network segment",
         "priority": "soon"
       },
       {
-        "action": "review all VPN login logs for jsmith to identify scope of unauthorized access",
+        "action": "Review VPN authentication logs for anomalous patterns beyond the 25 failed attempts already identified",
         "target": "VPN-GW",
         "priority": "soon"
-      },
-      {
-        "action": "enable MFA for all privileged and remote access accounts",
-        "target": "corporate identity provider",
-        "priority": "later"
       }
     ],
     "alert_id": "ALERT-002",
@@ -192,13 +188,49 @@
         "step": 1,
         "tool": "query_logs",
         "args": {
+          "host": "DB-01",
           "start": "2026-09-30T22:24:24",
           "end": "2026-10-01T06:24:24",
-          "text": "jsmith",
-          "limit": 100
+          "text": "jsmith"
         },
-        "result_preview": "{\"total_matches\": 42, \"showing\": 42, \"events\": [{\"timestamp\": \"2026-10-01 02:14:00\", \"source\": \"auth\", \"event\": \"login\", \"host\": \"VPN-GW\", \"src_ip\": \"185.220.101.47\", \"outcome\": \"failure\", \"user\": \"jsmith\", \"method\": \"vpn\"}, {\"timestamp\": \"2026-10-01 02:14:09\", \"source\": \"auth\", \"event\": \"login\", \"h",
-        "summary": "42 matching events (text jsmith)"
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2026-10-01 02:27:24\", \"source\": \"auth\", \"event\": \"login\", \"host\": \"DB-01\", \"src_ip\": \"10.0.1.107\", \"outcome\": \"success\", \"user\": \"jsmith\", \"method\": \"network\"}]}",
+        "summary": "1 matching event (host DB-01, text jsmith)"
+      },
+      {
+        "step": 1,
+        "tool": "query_logs",
+        "args": {
+          "host": "DC-01",
+          "start": "2026-09-30T22:24:24",
+          "end": "2026-10-01T06:24:24",
+          "text": "jsmith"
+        },
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2026-10-01 02:35:24\", \"source\": \"auth\", \"event\": \"login\", \"host\": \"DC-01\", \"src_ip\": \"10.0.1.107\", \"outcome\": \"success\", \"user\": \"jsmith\", \"method\": \"network\"}]}",
+        "summary": "1 matching event (host DC-01, text jsmith)"
+      },
+      {
+        "step": 1,
+        "tool": "query_logs",
+        "args": {
+          "host": "FS-01",
+          "start": "2026-09-30T22:24:24",
+          "end": "2026-10-01T06:24:24",
+          "text": "jsmith"
+        },
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2026-10-01 02:31:24\", \"source\": \"auth\", \"event\": \"login\", \"host\": \"FS-01\", \"src_ip\": \"10.0.1.107\", \"outcome\": \"success\", \"user\": \"jsmith\", \"method\": \"network\"}]}",
+        "summary": "1 matching event (host FS-01, text jsmith)"
+      },
+      {
+        "step": 1,
+        "tool": "query_logs",
+        "args": {
+          "host": "WS-14",
+          "start": "2026-09-30T22:24:24",
+          "end": "2026-10-01T06:24:24",
+          "text": "jsmith"
+        },
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2026-10-01 02:24:24\", \"source\": \"auth\", \"event\": \"login\", \"host\": \"WS-14\", \"src_ip\": \"10.0.1.107\", \"outcome\": \"success\", \"user\": \"jsmith\", \"method\": \"network\"}]}",
+        "summary": "1 matching event (host WS-14, text jsmith)"
       },
       {
         "step": 2,
@@ -222,70 +254,104 @@
         "step": 4,
         "tool": "mitre_lookup",
         "args": {
-          "behavior": "lateral movement, valid accounts"
+          "behavior": "T1021 lateral movement"
         },
-        "result_preview": "{\"matches\": [{\"id\": \"T1021\", \"name\": \"Remote Services\", \"tactic\": \"Lateral Movement\", \"mitigation\": \"Restrict admin protocols, segment network, disable compromised account\"}, {\"id\": \"T1078\", \"name\": \"Valid Accounts\", \"tactic\": \"Initial Access / Persistence\", \"mitigation\": \"Reset credentials, review ",
-        "summary": "Matched T1021 Remote Services, T1078 Valid Accounts"
+        "result_preview": "{\"matches\": [{\"id\": \"T1021\", \"name\": \"Remote Services\", \"tactic\": \"Lateral Movement\", \"mitigation\": \"Restrict admin protocols, segment network, disable compromised account\"}]}",
+        "summary": "Matched T1021 Remote Services"
       },
       {
         "step": 5,
         "tool": "query_logs",
         "args": {
-          "start": "2026-10-01T02:20:00",
-          "end": "2026-10-01T02:40:00",
           "host": "DB-01",
-          "limit": 50
+          "start": "2026-09-30T22:24:24",
+          "end": "2026-10-01T06:24:24",
+          "text": "jsmith"
         },
         "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2026-10-01 02:27:24\", \"source\": \"auth\", \"event\": \"login\", \"host\": \"DB-01\", \"src_ip\": \"10.0.1.107\", \"outcome\": \"success\", \"user\": \"jsmith\", \"method\": \"network\"}]}",
-        "summary": "1 matching event (host DB-01)"
+        "summary": "1 matching event (host DB-01, text jsmith)"
+      },
+      {
+        "step": 5,
+        "tool": "query_logs",
+        "args": {
+          "host": "DC-01",
+          "start": "2026-09-30T22:24:24",
+          "end": "2020-10-01T06:24:24",
+          "text": "jsmith"
+        },
+        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}",
+        "summary": "0 matching events (host DC-01, text jsmith)"
+      },
+      {
+        "step": 5,
+        "tool": "query_logs",
+        "args": {
+          "host": "FS-01",
+          "start": "2026-09-30T22:24:24",
+          "end": "2026-10-01T06:24:24",
+          "text": "jsmith"
+        },
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2026-10-01 02:31:24\", \"source\": \"auth\", \"event\": \"login\", \"host\": \"FS-01\", \"src_ip\": \"10.0.1.107\", \"outcome\": \"success\", \"user\": \"jsmith\", \"method\": \"network\"}]}",
+        "summary": "1 matching event (host FS-01, text jsmith)"
+      },
+      {
+        "step": 5,
+        "tool": "query_logs",
+        "args": {
+          "host": "WS-14",
+          "start": "2026-09-30T22:24:24",
+          "end": "2026-10-01T06:24:24",
+          "text": "jsmith"
+        },
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2026-10-01 02:24:24\", \"source\": \"auth\", \"event\": \"login\", \"host\": \"WS-14\", \"src_ip\": \"10.0.1.107\", \"outcome\": \"success\", \"user\": \"jsmith\", \"method\": \"network\"}]}",
+        "summary": "1 matching event (host WS-14, text jsmith)"
       },
       {
         "step": 6,
         "tool": "query_logs",
         "args": {
-          "start": "2026-10-01T02:20:00",
-          "end": "2026-10-01T02:40:00",
           "host": "DC-01",
-          "limit": 50
+          "start": "2026-09-30T22:24:24",
+          "end": "2026-10-01T06:24:24",
+          "text": "jsmith"
         },
         "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2026-10-01 02:35:24\", \"source\": \"auth\", \"event\": \"login\", \"host\": \"DC-01\", \"src_ip\": \"10.0.1.107\", \"outcome\": \"success\", \"user\": \"jsmith\", \"method\": \"network\"}]}",
-        "summary": "1 matching event (host DC-01)"
+        "summary": "1 matching event (host DC-01, text jsmith)"
       },
       {
         "step": 7,
-        "tool": "query_logs",
+        "tool": "mitre_lookup",
         "args": {
-          "start": "2026-10-01T02:20:00",
-          "end": "2026-10-01T02:40:00",
-          "host": "FS-01",
-          "limit": 50
+          "behavior": "T1078 valid accounts"
         },
-        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2026-10-01 02:31:24\", \"source\": \"auth\", \"event\": \"login\", \"host\": \"FS-01\", \"src_ip\": \"10.0.1.107\", \"outcome\": \"success\", \"user\": \"jsmith\", \"method\": \"network\"}]}",
-        "summary": "1 matching event (host FS-01)"
+        "result_preview": "{\"matches\": [{\"id\": \"T1078\", \"name\": \"Valid Accounts\", \"tactic\": \"Initial Access / Persistence\", \"mitigation\": \"Reset credentials, review session activity, enforce MFA\"}]}",
+        "summary": "Matched T1078 Valid Accounts"
       },
       {
         "step": 8,
-        "tool": "mitre_lookup",
+        "tool": "query_logs",
         "args": {
-          "behavior": "T1021 T1078"
+          "start": "2026-09-30T22:24:24",
+          "end": "2026-10-01T06:24:24",
+          "text": "jsmith"
         },
-        "result_preview": "{\"matches\": [], \"note\": \"No keyword match. Choose from these known techniques:\", \"available\": {\"T1110\": \"Brute Force\", \"T1078\": \"Valid Accounts\", \"T1021\": \"Remote Services\", \"T1021.002\": \"Remote Services: SMB/Windows Admin Shares (PsExec-style)\", \"T1048\": \"Exfiltration Over Alternative Protocol\", \"T",
-        "summary": "No direct technique match"
+        "result_preview": "{\"total_matches\": 42, \"showing\": 25, \"events\": [{\"timestamp\": \"2026-10-01 02:14:00\", \"source\": \"auth\", \"event\": \"login\", \"host\": \"VPN-GW\", \"src_ip\": \"185.220.101.47\", \"outcome\": \"failure\", \"user\": \"jsmith\", \"method\": \"vpn\"}, {\"timestamp\": \"2026-10-01 02:14:09\", \"source\": \"auth\", \"event\": \"login\", \"h",
+        "summary": "42 matching events (text jsmith)"
       },
       {
         "step": 9,
         "tool": "query_logs",
         "args": {
-          "start": "2026-09-30T22:00:00",
-          "end": "2026-10-01T06:00:00",
-          "text": "jsmith",
-          "source": "process",
-          "limit": 30
+          "start": "2026-10-01 02:17:00",
+          "end": "2026-10-01 02:25:00",
+          "text": "jsmith"
         },
-        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}",
-        "summary": "0 matching events (text jsmith, source process)"
+        "result_preview": "{\"total_matches\": 14, \"showing\": 14, \"events\": [{\"timestamp\": \"2026-10-01 02:17:10\", \"source\": \"auth\", \"event\": \"login\", \"host\": \"VPN-GW\", \"src_ip\": \"185.220.101.47\", \"outcome\": \"failure\", \"user\": \"jsmith\", \"method\": \"vpn\"}, {\"timestamp\": \"2026-10-01 02:17:16\", \"source\": \"auth\", \"event\": \"login\", \"h",
+        "summary": "14 matching events (text jsmith)"
       }
     ],
+    "seconds": 12.0,
     "model": "nvidia/Nemotron-3_5-Lightning",
     "provider": "Nebius Token Factory",
     "run_date": "2026-10-05"
@@ -293,44 +359,45 @@
   {
     "verdict": "true_positive",
     "confidence": 95,
-    "title": "Critical data exfiltration from FS-01 to known C2 infrastructure",
-    "summary": "FS-01 transferred ~2.5GB of data to external IP 45.137.21.9 over 6 connections in under 18 minutes. The destination IP has 88 threat reports tagged as known C2 and data-exfil infrastructure (Netherlands). This is the exfiltration phase of the jsmith account compromise chain starting with ALERT-001 (brute force) and ALERT-002 (lateral movement).",
+    "title": "Data exfiltration from FS-01 to known C2 infrastructure",
+    "summary": "FS-01 transferred 2.579 GB of data to external IP 45.137.21.9 over 6 connections on port 8443. The destination IP is confirmed malicious (known C2/exfiltration infrastructure with 88 reports). This continues the attack chain from ALERT-001/002 where jsmith's account was compromised via brute force VPN login and used for lateral movement.",
     "mitre": [
       "T1048",
-      "T1078"
+      "T1071.001"
     ],
     "evidence": [
-      "6 firewall connections from FS-01 src_ip 10.0.2.60 to 45.137.21.9:8443 between 03:02-03:17 UTC",
-      "Total 2,579,537,984 bytes (~2.5GB) exfiltrated",
-      "IP reputation: 45.137.21.9 malicious, tagged known-c2/data-exfil-infra, 88 reports",
-      "jsmith is Marketing Coordinator with no remote work flag - unusual external transfer",
-      "Prior alerts ALERT-001/002 established jsmith account compromise attack chain"
+      "6 firewall connections from 10.0.2.60 to 45.137.21.9:8443 between 03:02-03:17 UTC",
+      "Total 2,579 MB exfiltrated to external IP",
+      "IP reputation: malicious, tagged known-c2 and data-exfil-infra, 88 reports, country NL",
+      "User jsmith is Marketing Coordinator with normal FS-01 access, account previously compromised in ALERT-002",
+      "MITRE T1048 (Exfiltration Over Alternative Protocol) confirmed by detection rule tags",
+      "MITRE T1071.001 (Web Protocols C2) relevant as port 8443 is typically HTTPS"
     ],
-    "related_to_prior": "Continuation of jsmith account compromise chain: ALERT-001 (brute force VPN) \u2192 ALERT-002 (lateral movement across 4 hosts) \u2192 ALERT-003 (data exfiltration)",
+    "related_to_prior": "Continuation of attack chain: ALERT-001 (brute force VPN login) \u2192 ALERT-002 (jsmith lateral movement) \u2192 ALERT-003 (data exfiltration from compromised account's file server access)",
     "recommended_actions": [
       {
-        "action": "Immediately block outbound connections from FS-01 to 45.137.21.9 at firewall",
-        "target": "FS-01 firewall",
+        "action": "Block outbound connections to 45.137.21.9 at firewall/egress filter",
+        "target": "FS-01 network segment",
         "priority": "immediate"
       },
       {
-        "action": "Isolate FS-01 from network to prevent further exfiltration",
+        "action": "Isolate FS-01 and reset jsmith account credentials",
+        "target": "FS-01, jsmith account",
+        "priority": "immediate"
+      },
+      {
+        "action": "Full forensic analysis of FS-01 to determine exfiltrated data scope",
         "target": "FS-01",
-        "priority": "immediate"
-      },
-      {
-        "action": "Reset jsmith account credentials and enforce MFA",
-        "target": "jsmith account",
-        "priority": "immediate"
-      },
-      {
-        "action": "Investigate src_ip 10.0.2.60 on FS-01 for compromised agent or pivot host",
-        "target": "FS-01 host",
         "priority": "soon"
       },
       {
-        "action": "Deploy egress filtering/DLP on file servers to prevent future T1048 exfiltration",
-        "target": "File server infrastructure",
+        "action": "Review all other file server access by jsmith since account compromise",
+        "target": "All file servers",
+        "priority": "soon"
+      },
+      {
+        "action": "Enable enhanced monitoring on port 8443 outbound connections",
+        "target": "Network egress",
         "priority": "later"
       }
     ],
@@ -384,22 +451,35 @@
         "step": 5,
         "tool": "mitre_lookup",
         "args": {
-          "behavior": "data exfiltration to external IP"
+          "behavior": "data exfiltration to external IP, large volume transfer, C2 communication"
         },
-        "result_preview": "{\"matches\": [{\"id\": \"T1048\", \"name\": \"Exfiltration Over Alternative Protocol\", \"tactic\": \"Exfiltration\", \"mitigation\": \"Block destination, egress filtering, DLP on file servers\"}]}",
-        "summary": "Matched T1048 Exfiltration Over Alternative Protocol"
+        "result_preview": "{\"matches\": [{\"id\": \"T1048\", \"name\": \"Exfiltration Over Alternative Protocol\", \"tactic\": \"Exfiltration\", \"mitigation\": \"Block destination, egress filtering, DLP on file servers\"}, {\"id\": \"T1071.001\", \"name\": \"Application Layer Protocol: Web Protocols (C2 over HTTP/S)\", \"tactic\": \"Command and Control",
+        "summary": "Matched T1048 Exfiltration Over Alternative Protocol, T1071.001 Application Layer Protocol: Web Protocols (C2 over HTTP/S)"
       },
       {
         "step": 6,
         "tool": "mitre_lookup",
         "args": {
-          "behavior": "lateral movement"
+          "behavior": "lateral movement after VPN compromise"
         },
-        "result_preview": "{\"matches\": [{\"id\": \"T1021\", \"name\": \"Remote Services\", \"tactic\": \"Lateral Movement\", \"mitigation\": \"Restrict admin protocols, segment network, disable compromised account\"}]}",
-        "summary": "Matched T1021 Remote Services"
+        "result_preview": "{\"matches\": [{\"id\": \"T1021\", \"name\": \"Remote Services\", \"tactic\": \"Lateral Movement\", \"mitigation\": \"Restrict admin protocols, segment network, disable compromised account\"}, {\"id\": \"T1078\", \"name\": \"Valid Accounts\", \"tactic\": \"Initial Access / Persistence\", \"mitigation\": \"Reset credentials, review ",
+        "summary": "Matched T1021 Remote Services, T1078 Valid Accounts"
       },
       {
         "step": 7,
+        "tool": "query_logs",
+        "args": {
+          "host": "FS-01",
+          "text": "8443",
+          "start": "2026-09-30T03:00:00",
+          "end": "2026-10-01T04:00:00",
+          "limit": 20
+        },
+        "result_preview": "{\"total_matches\": 6, \"showing\": 6, \"events\": [{\"timestamp\": \"2026-10-01 03:02:00\", \"source\": \"firewall\", \"event\": \"connection\", \"action\": \"allow\", \"host\": \"FS-01\", \"src_ip\": \"10.0.2.60\", \"dst_ip\": \"45.137.21.9\", \"dst_port\": \"8443.0\", \"bytes_out\": \"443332624.0\"}, {\"timestamp\": \"2026-10-01 03:05:00\", ",
+        "summary": "6 matching events (host FS-01, text 8443)"
+      },
+      {
+        "step": 8,
         "tool": "query_logs",
         "args": {
           "host": "FS-01",
@@ -412,7 +492,7 @@
         "summary": "7 matching events (host FS-01, text 10.0.2.60)"
       },
       {
-        "step": 8,
+        "step": 9,
         "tool": "query_logs",
         "args": {
           "host": "FS-01",
@@ -423,21 +503,9 @@
         },
         "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}",
         "summary": "0 matching events (host FS-01, text src_ip:10.0.2.60)"
-      },
-      {
-        "step": 9,
-        "tool": "query_logs",
-        "args": {
-          "host": "FS-01",
-          "text": "10.0.2.60",
-          "start": "2026-09-30T03:00:00",
-          "end": "2026-10-01T04:00:00",
-          "limit": 20
-        },
-        "result_preview": "{\"total_matches\": 7, \"showing\": 7, \"events\": [{\"timestamp\": \"2026-10-01 01:00:00\", \"source\": \"firewall\", \"event\": \"connection\", \"action\": \"allow\", \"host\": \"FS-01\", \"src_ip\": \"10.0.2.60\", \"dst_ip\": \"10.0.9.10\", \"dst_port\": \"445.0\", \"bytes_out\": \"2400000000.0\"}, {\"timestamp\": \"2026-10-01 03:02:00\", \"s",
-        "summary": "7 matching events (host FS-01, text 10.0.2.60)"
       }
     ],
+    "seconds": 10.2,
     "model": "nvidia/Nemotron-3_5-Lightning",
     "provider": "Nebius Token Factory",
     "run_date": "2026-10-05"

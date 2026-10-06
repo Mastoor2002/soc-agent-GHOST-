@@ -50,7 +50,9 @@ def run_scenario(name: str, agent: str | None) -> dict:
         t0 = time.perf_counter()
         for a in alerts:
             model = MockModel() if agent == "mock" else NIMModel()
+            t_alert = time.perf_counter()
             r = investigate(a, toolbox, model, prior=prior, verbose=False)
+            r["seconds"] = round(time.perf_counter() - t_alert, 1)  # shown as triage time
             for t in r.get("trace", []):
                 t.pop("result_full", None)
             if agent == "nim":  # record who produced it, shown by the online demo

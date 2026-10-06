@@ -223,7 +223,16 @@ def ground_mitre(report: dict, alert: dict, trace: list[dict]) -> dict:
     seen = set(alert.get("rule_tags", []))
     seen |= set(TECHNIQUE_ID.findall(SYSTEM_PROMPT))  # techniques our own guidance names
     for t in trace:
-        seen |= set(TECHNIQUE_ID.findall(t.get("result_full", t.get("result_preview", ""))))
+        text = t.get("result_full", t.get("result_preview", ""))
+        if t.get("tool") == "mitre_lookup":
+            # Only real MATCHES count. On a miss the tool lists every known technique as
+            # options to choose from; those are a menu, not evidence (found 2026-10-05:
+            # T1048 Exfiltration slipped into an SMBExec report through that menu).
+            try:
+                text = json.dumps(json.loads(text).get("matches", []))
+            except (ValueError, AttributeError):
+                text = text.split('"available"')[0]
+        seen |= set(TECHNIQUE_ID.findall(text))
     seen |= {t.split(".")[0] for t in seen}  # a confirmed T1059.001 supports its parent T1059
     claimed = [m.strip() for m in report.get("mitre", []) if isinstance(m, str)]
     report["mitre"] = [m for m in claimed if m in seen]

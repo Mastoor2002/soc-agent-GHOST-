@@ -55,7 +55,7 @@ Real scenarios come from the [OTRF Security Datasets](https://github.com/OTRF/Se
 
 ## Benchmark
 
-Latest run (October 5, 2026), `nvidia/Nemotron-3_5-Lightning` via **Nebius Token Factory**:
+First Nebius run (October 5, 2026), `nvidia/Nemotron-3_5-Lightning` via **Nebius Token Factory**:
 
 | Scenario | Events | Answer key | Detection | Agent | Agent time |
 |---|---|---|---|---|---|
@@ -65,7 +65,7 @@ Latest run (October 5, 2026), `nvidia/Nemotron-3_5-Lightning` via **Nebius Token
 | Empire Invoke-SMBExec (OTRF) | 7,489 | T1021.002 | 1/1 | 1/1 | 40 s |
 | Empire Invoke-WMI (OTRF) | 6,352 | T1047 | 1/1 | 1/1 | 32 s |
 
-8/8 answer-key techniques, 0 hallucinated techniques, and the legitimate Azure agent correctly dismissed as a false positive. The same model on NVIDIA's free endpoint (October 3) also scored 8/8 but took 1,312 s of agent time, against 147 s on Nebius.
+8/8 answer-key techniques, 0 hallucinated techniques, and the legitimate Azure agent correctly dismissed as a false positive. The same model on NVIDIA's free endpoint (October 3) also scored 8/8 but took 1,312 s of agent time, against 147 s on Nebius. A later run that night, after tightening the grounding check, scored the same 8/8 in 178 s.
 
 **Choosing a provider:** GHOST talks to any OpenAI-compatible endpoint. Set `NIM_BASE_URL`, `NIM_MODEL` and the matching key in `.env` (see `.env.example` for NVIDIA and Nebius settings). No code changes.
 

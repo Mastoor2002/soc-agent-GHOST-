@@ -167,9 +167,10 @@ class Toolbox:
             return {"error": "MITRE lookup limit reached for this alert. Use the techniques "
                              "you already found and write your final report."}
         b = behavior.lower()
-        ids = sorted({tid for kw, tid in KEYWORDS.items() if kw in b})
-        if behavior.upper() in MITRE:
-            ids = [behavior.upper()]
+        ids = {tid for kw, tid in KEYWORDS.items() if kw in b}
+        # Technique IDs typed into the query ("T1021.002 T1543.003") are matched directly
+        ids |= {t for t in re.findall(r"\bT\d{4}(?:\.\d{3})?\b", behavior.upper()) if t in MITRE}
+        ids = sorted(ids)
         if ids:
             return {"matches": [{"id": i, **MITRE[i]} for i in ids]}
         # No match: show the whole (small) list so the model picks instead of guessing forever
@@ -236,8 +237,15 @@ class Toolbox:
                 urls += re.findall(r"https?://[^\s'\")]+", inner)
             except Exception:
                 pass
+        # What the decoded evidence itself proves, in ATT&CK terms
+        techniques = ["T1059.001", "T1027"]  # PowerShell, with a deliberately hidden command
+        if indicators["disables_script_block_logging"] or indicators["bypasses_amsi_antivirus_scan"]:
+            techniques.append("T1562.001")  # impairs defenses
+        if indicators["downloads_from_web"]:
+            techniques.append("T1105")  # pulls in more attack code
         return {"decoded_length": len(joined),
                 "indicators": {k: v for k, v in indicators.items() if v},
+                "techniques_shown_by_this_evidence": techniques,
                 "urls_contacted": sorted(set(urls)),
                 "decoded_preview": joined[:700]}
 
