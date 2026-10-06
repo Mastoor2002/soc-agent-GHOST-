@@ -68,18 +68,32 @@ MAX_STEPS = 10  # safety limit so a confused model can't loop forever
 # --------------------------------------------------------------------------
 # Talking to the model
 # --------------------------------------------------------------------------
+def provider() -> tuple[str, str, str | None]:
+    """Which hosted Nemotron to use, from .env: (name, base_url, api_key or None).
+    The same OpenAI-compatible code talks to either provider; only these change:
+      NVIDIA build.nvidia.com : NIM_BASE_URL=https://integrate.api.nvidia.com/v1  + NVIDIA_API_KEY
+      Nebius Token Factory    : NIM_BASE_URL=https://api.tokenfactory.nebius.com/v1/ + NEBIUS_API_KEY"""
+    base = os.environ.get("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
+    if "nebius" in base:
+        name, key = "Nebius Token Factory", os.environ.get("NEBIUS_API_KEY")
+    else:
+        name, key = "NVIDIA NIM", os.environ.get("NVIDIA_API_KEY")
+    if not key or "your-key" in key or "your_key" in key:
+        key = None
+    return name, base, key
+
+
 class NIMModel:
-    """Real model via NVIDIA NIM (OpenAI-compatible API)."""
+    """Real Nemotron via an OpenAI-compatible API: NVIDIA NIM or Nebius Token Factory."""
 
     def __init__(self):
         from openai import OpenAI  # imported here so --mock works without the package
-        key = os.environ.get("NVIDIA_API_KEY")
+        name, base, key = provider()
         if not key:
-            raise SystemExit("Set NVIDIA_API_KEY in .env (get one free at build.nvidia.com), "
-                             "or run with --mock")
-        self.client = OpenAI(
-            base_url=os.environ.get("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"),
-            api_key=key)
+            raise SystemExit(f"No API key for {name}: set "
+                             f"{'NEBIUS_API_KEY' if 'nebius' in base else 'NVIDIA_API_KEY'} "
+                             "in .env, or run with --mock")
+        self.client = OpenAI(base_url=base, api_key=key)
         self.model = os.environ.get("NIM_MODEL", "nvidia/nemotron-3-super-120b-a12b")
 
     def step(self, messages: list[dict], allow_tools: bool = True) -> dict:

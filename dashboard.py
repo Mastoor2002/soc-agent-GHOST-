@@ -20,7 +20,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from src import detect, scenarios
-from src.agent import MockModel, NIMModel, investigate
+from src.agent import MockModel, NIMModel, investigate, provider
 from src.tools import MITRE, Toolbox, summarize_step
 
 ROOT = Path(__file__).resolve().parent
@@ -61,12 +61,12 @@ with st.sidebar:
         ss.scenario, ss.reports, ss.decisions = scenario, {}, {}
     mode = st.radio("Detective", ["Practice (scripted)", "Nemotron (real AI)"],
                     help="Practice mode needs no API key. Real AI uses your NVIDIA key from .env.")
-    has_key = bool(os.environ.get("NVIDIA_API_KEY", "").startswith("nvapi-")
-                   and "your-key" not in os.environ.get("NVIDIA_API_KEY", ""))
+    provider_name, _, key = provider()
+    has_key = key is not None
     if mode.startswith("Nemotron"):
-        st.caption(f"Model: `{os.environ.get('NIM_MODEL', 'not set')}`")
+        st.caption(f"Model: `{os.environ.get('NIM_MODEL', 'not set')}` via {provider_name}")
         if not has_key:
-            st.error("No NVIDIA key found in .env")
+            st.error(f"No API key for {provider_name} in .env")
     run = st.button("▶ Run live investigation", type="primary", use_container_width=True,
                     disabled=mode.startswith("Nemotron") and not has_key)
     REPORTS = ROOT / "reports" / f"incidents_{scenario}.json"
@@ -100,7 +100,11 @@ with st.container(border=True):
         st.caption(f"Data source: {ctx['source_url']} · dataset {ctx.get('otrf_id', '')}")
 
 if ss.get("showing_saved") and ss.reports:
-    st.info("Showing a saved investigation by NVIDIA Nemotron (October 3 benchmark run). "
+    first = next(iter(ss.reports.values()))
+    who = first.get("model") or "NVIDIA Nemotron"
+    via = f" via {first['provider']}" if first.get("provider") else ""
+    when = f", run on {first['run_date']}" if first.get("run_date") else ""
+    st.info(f"Showing a saved investigation by `{who}`{via}{when}. "
             "Press **▶ Run live investigation** to watch an investigation happen.")
 
 reports = [ss.reports[a["id"]] for a in alerts if a["id"] in ss.reports]

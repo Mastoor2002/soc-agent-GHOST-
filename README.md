@@ -1,6 +1,6 @@
 # 👻 GHOST — Generative Hunting & Operations Security Toolkit
 
-An AI security analyst that hunts attacks in your logs, investigates them like a human expert with **NVIDIA Nemotron** (served through **NIM**), and recommends fixes that a human approves. Detection is written to run GPU-accelerated via **RAPIDS**.
+An AI security analyst that hunts attacks in your logs, investigates them like a human expert with **NVIDIA Nemotron** (served through **Nebius Token Factory** or **NVIDIA NIM**), and recommends fixes that a human approves. Detection is written to run GPU-accelerated via **RAPIDS**.
 
 Tested on a synthetic attack **and on real attack recordings** from the [OTRF Security Datasets](https://github.com/OTRF/Security-Datasets) project.
 
@@ -54,6 +54,20 @@ python -m src.main --scenario real_psexec   # now the real Nemotron investigates
 Real scenarios come from the [OTRF Security Datasets](https://github.com/OTRF/Security-Datasets): attacks run with real tools in a lab Windows domain. The answer key is each dataset's official label, not ours.
 
 ## Benchmark
+
+Latest run (October 5, 2026), `nvidia/Nemotron-3_5-Lightning` via **Nebius Token Factory**:
+
+| Scenario | Events | Answer key | Detection | Agent | Agent time |
+|---|---|---|---|---|---|
+| Practice attack (synthetic) | 1,270 | T1021, T1048, T1078, T1110 | 3/4 | 4/4 | 28 s |
+| Mimikatz LogonPasswords (OTRF) | 6,015 | T1003.001 | 1/1 | 1/1 | 17 s |
+| Empire Invoke-PsExec (OTRF) | 4,335 | T1021 | 1/1 | 1/1 | 30 s |
+| Empire Invoke-SMBExec (OTRF) | 7,489 | T1021.002 | 1/1 | 1/1 | 40 s |
+| Empire Invoke-WMI (OTRF) | 6,352 | T1047 | 1/1 | 1/1 | 32 s |
+
+8/8 answer-key techniques, 0 hallucinated techniques, and the legitimate Azure agent correctly dismissed as a false positive. The same model on NVIDIA's free endpoint (October 3) also scored 8/8 but took 1,312 s of agent time, against 147 s on Nebius.
+
+**Choosing a provider:** GHOST talks to any OpenAI-compatible endpoint. Set `NIM_BASE_URL`, `NIM_MODEL` and the matching key in `.env` (see `.env.example` for NVIDIA and Nebius settings). No code changes.
 
 ```bash
 python -m src.benchmark                 # detection only, instant

@@ -3,7 +3,7 @@
     "scenario": "synthetic",
     "title": "Practice attack (synthetic)",
     "events": 1270,
-    "detect_seconds": 0.054,
+    "detect_seconds": 0.063,
     "alerts": 3,
     "expected": [
       "T1021",
@@ -16,7 +16,7 @@
       "T1048",
       "T1110"
     ],
-    "agent_seconds": 280.8,
+    "agent_seconds": 28.0,
     "agent_hit": [
       "T1021",
       "T1048",
@@ -32,7 +32,7 @@
     "scenario": "real_mimikatz",
     "title": "Real attack: Mimikatz LogonPasswords (OTRF)",
     "events": 6015,
-    "detect_seconds": 0.034,
+    "detect_seconds": 0.042,
     "alerts": 2,
     "expected": [
       "T1003.001"
@@ -40,7 +40,7 @@
     "detection_hit": [
       "T1003.001"
     ],
-    "agent_seconds": 103.1,
+    "agent_seconds": 16.9,
     "agent_hit": [
       "T1003.001"
     ],
@@ -53,7 +53,7 @@
     "scenario": "real_psexec",
     "title": "Real attack: Empire Invoke-PsExec (OTRF)",
     "events": 4335,
-    "detect_seconds": 0.033,
+    "detect_seconds": 0.035,
     "alerts": 3,
     "expected": [
       "T1021"
@@ -61,20 +61,20 @@
     "detection_hit": [
       "T1021"
     ],
-    "agent_seconds": 307.3,
+    "agent_seconds": 30.4,
     "agent_hit": [
       "T1021"
     ],
     "confirmed": 3,
     "unverified": [],
-    "self_corrected": 2,
+    "self_corrected": 0,
     "benign": []
   },
   {
     "scenario": "real_smbexec",
     "title": "Real attack: Empire Invoke-SMBExec (OTRF)",
     "events": 7489,
-    "detect_seconds": 0.046,
+    "detect_seconds": 0.078,
     "alerts": 4,
     "expected": [
       "T1021.002"
@@ -82,7 +82,7 @@
     "detection_hit": [
       "T1021.002"
     ],
-    "agent_seconds": 374.5,
+    "agent_seconds": 40.4,
     "agent_hit": [
       "T1021.002"
     ],
@@ -102,7 +102,7 @@
     "scenario": "real_wmi",
     "title": "Real attack: Empire Invoke-WMI (OTRF)",
     "events": 6352,
-    "detect_seconds": 0.068,
+    "detect_seconds": 0.04,
     "alerts": 3,
     "expected": [
       "T1047"
@@ -110,7 +110,7 @@
     "detection_hit": [
       "T1047"
     ],
-    "agent_seconds": 247.3,
+    "agent_seconds": 31.9,
     "agent_hit": [
       "T1047"
     ],

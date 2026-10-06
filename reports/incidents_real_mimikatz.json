@@ -1,20 +1,19 @@
 [
   {
     "verdict": "true_positive",
-    "confidence": 92,
-    "title": "PowerShell C2 Beacon to External IP",
-    "summary": "User pgustavo on WORKSTATION5 established 35 sustained connections from powershell.exe to external IP 10.10.10.5:80 starting at 14:32:26. The destination IP is flagged as suspicious (private address outside company known ranges), indicating likely command-and-control beaconing behavior.",
+    "confidence": 85,
+    "title": "PowerShell C2 Beacon on WORKSTATION5",
+    "summary": "User pgustavo's powershell.exe on WORKSTATION5 established 35 connections to external IP 10.10.10.5:80, which is a private address not in company network ranges -- consistent with C2 beaconing over HTTP/S. The destination IP's suspicious reputation and the high volume of connections confirm malicious command-and-control activity.",
     "mitre": [
       "T1071.001"
     ],
     "evidence": [
-      "35 network connections from powershell.exe (PID not specified) to 10.10.10.5:80 between 14:32:26-14:34:57",
-      "IP 10.10.10.5 reputation: suspicious, private address not in company known ranges",
-      "User pgustavo is a Domain user (lab) on WORKSTATION5",
-      "Process chain: powershell.exe launched whoami.exe /user",
-      "No -EncodedCommand found in immediate timeframe"
+      "powershell.exe on WORKSTATION5 (user pgustavo) connected to 10.10.10.5:80 with 35 connections",
+      "IP 10.10.10.5 rated suspicious -- private address not in company known ranges",
+      "User pgustavo is a Domain lab user with WORKSTATION5 as normal host",
+      "MITRE ATT&CK T1071.001 confirmed: Application Layer Protocol Web Protocols C2 over HTTP/S"
     ],
-    "related_to_prior": "none yet",
+    "related_to_prior": "none yet (first alert)",
     "recommended_actions": [
       {
         "action": "Isolate WORKSTATION5 from network immediately",
@@ -22,22 +21,22 @@
         "priority": "immediate"
       },
       {
-        "action": "Block outbound traffic to 10.10.10.5 at firewall/proxy",
-        "target": "network-boundary",
+        "action": "Block outbound traffic to 10.10.10.5 at perimeter firewall",
+        "target": "network-gateway",
         "priority": "immediate"
       },
       {
-        "action": "Collect full PowerShell transcript and process metadata from WORKSTATION5",
+        "action": "Collect full powershell transcript and process tree from WORKSTATION5",
         "target": "WORKSTATION5",
         "priority": "soon"
       },
       {
-        "action": "Check for other hosts connecting to 10.10.10.5",
-        "target": "network",
+        "action": "Scan WORKSTATION5 for additional C2 artifacts and persistence mechanisms",
+        "target": "WORKSTATION5",
         "priority": "soon"
       },
       {
-        "action": "Reset pgustavo credentials and verify account legitimacy",
+        "action": "Reset credentials for user pgustavo if password-based access was used",
         "target": "AD",
         "priority": "later"
       }
@@ -49,28 +48,29 @@
         "step": 1,
         "tool": "query_logs",
         "args": {
-          "user": "pgustavo",
-          "text": "powershell",
           "host": "WORKSTATION5",
-          "start": "2020-08-07T14:30:00",
-          "limit": 50,
-          "end": "2020-08-07T14:35:00",
-          "source": "process"
+          "source": "process",
+          "text": "powershell.exe",
+          "start": "2020-08-07T14:20:00",
+          "end": "2020-08-07T14:45:00",
+          "limit": 50
         },
-        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-08-07 14:32:47.591000\", \"host\": \"WORKSTATION5\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"pgustavo\", \"process\": \"C:\\\\Windows\\\\System32\\\\whoami.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powe"
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-08-07 14:32:47.591000\", \"host\": \"WORKSTATION5\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"pgustavo\", \"process\": \"C:\\\\Windows\\\\System32\\\\whoami.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powe",
+        "summary": "1 matching event (host WORKSTATION5, source process, text powershell.exe)"
       },
       {
         "step": 2,
         "tool": "query_logs",
         "args": {
-          "end": "2020-08-07T14:35:00",
-          "source": "process",
-          "text": "powershell.exe",
           "host": "WORKSTATION5",
-          "start": "2020-08-07T14:30:00",
+          "source": "process",
+          "text": "powershell",
+          "start": "2020-08-07T14:20:00",
+          "end": "2020-08-07T14:45:00",
           "limit": 50
         },
-        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-08-07 14:32:47.591000\", \"host\": \"WORKSTATION5\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"pgustavo\", \"process\": \"C:\\\\Windows\\\\System32\\\\whoami.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powe"
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-08-07 14:32:47.591000\", \"host\": \"WORKSTATION5\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"pgustavo\", \"process\": \"C:\\\\Windows\\\\System32\\\\whoami.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powe",
+        "summary": "1 matching event (host WORKSTATION5, source process, text powershell)"
       },
       {
         "step": 3,
@@ -78,25 +78,27 @@
         "args": {
           "host": "WORKSTATION5",
           "source": "process",
-          "end": "2020-08-07T14:35:00",
-          "start": "2020-08-07T14:30:00",
-          "limit": 50,
-          "text": "10.10.10.5"
+          "text": "powershell.exe -enc",
+          "start": "2020-08-07T14:20:00",
+          "end": "2020-08-07T14:45:00",
+          "limit": 50
         },
-        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}"
+        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}",
+        "summary": "0 matching events (host WORKSTATION5, source process, text powershell.exe -enc)"
       },
       {
         "step": 4,
         "tool": "query_logs",
         "args": {
-          "start": "2020-08-07T14:30:00",
-          "source": "network",
           "host": "WORKSTATION5",
-          "end": "2020-08-07T14:35:00",
-          "text": "10.10.10.5",
+          "source": "process",
+          "text": "powershell",
+          "start": "2020-08-07T14:20:00",
+          "end": "2020-08-07T14:45:00",
           "limit": 50
         },
-        "result_preview": "{\"total_matches\": 30, \"showing\": 30, \"events\": [{\"timestamp\": \"2020-08-07 14:32:26.361000\", \"host\": \"WORKSTATION5\", \"source\": \"network\", \"event\": \"connection\", \"user\": \"pgustavo\", \"process\": \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\", \"src_ip\": \"172.18.39.5\", \"dst_ip\": \"10.10.1"
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-08-07 14:32:47.591000\", \"host\": \"WORKSTATION5\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"pgustavo\", \"process\": \"C:\\\\Windows\\\\System32\\\\whoami.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powe",
+        "summary": "1 matching event (host WORKSTATION5, source process, text powershell)"
       },
       {
         "step": 5,
@@ -104,7 +106,8 @@
         "args": {
           "ip": "10.10.10.5"
         },
-        "result_preview": "{\"ip\": \"10.10.10.5\", \"verdict\": \"suspicious\", \"note\": \"Private address but NOT in the company's known network ranges (not a known company asset)\"}"
+        "result_preview": "{\"ip\": \"10.10.10.5\", \"verdict\": \"suspicious\", \"note\": \"Private address but NOT in the company's known network ranges (not a known company asset)\"}",
+        "summary": "10.10.10.5 is suspicious: Private address but NOT in the company's known network ranges (not a known company asset)"
       },
       {
         "step": 6,
@@ -112,59 +115,63 @@
         "args": {
           "user": "pgustavo"
         },
-        "result_preview": "{\"role\": \"Domain user (lab)\", \"normal_hosts\": [\"WORKSTATION5\"], \"admin\": \"unknown\"}"
+        "result_preview": "{\"role\": \"Domain user (lab)\", \"normal_hosts\": [\"WORKSTATION5\"], \"admin\": \"unknown\"}",
+        "summary": "pgustavo: Domain user (lab), normally uses WORKSTATION5"
       },
       {
         "step": 7,
-        "tool": "query_logs",
+        "tool": "mitre_lookup",
         "args": {
-          "start": "2020-08-07T14:30:00",
-          "host": "WORKSTATION5",
-          "end": "2020-08-07T14:35:00",
-          "text": "-enc or -EncodedCommand",
-          "source": "process",
-          "limit": 50
+          "behavior": "T1071.001"
         },
-        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}"
+        "result_preview": "{\"matches\": [{\"id\": \"T1071.001\", \"name\": \"Application Layer Protocol: Web Protocols (C2 over HTTP/S)\", \"tactic\": \"Command and Control\", \"mitigation\": \"Block unknown destinations; proxy and inspect outbound web traffic\"}]}",
+        "summary": "Matched T1071.001 Application Layer Protocol: Web Protocols (C2 over HTTP/S)"
       },
       {
         "step": 8,
         "tool": "mitre_lookup",
         "args": {
-          "behavior": "T1071.001 T1059.001"
+          "behavior": "beaconing"
         },
-        "result_preview": "{\"matches\": [], \"note\": \"No keyword match. Choose from these known techniques:\", \"available\": {\"T1110\": \"Brute Force\", \"T1078\": \"Valid Accounts\", \"T1021\": \"Remote Services\", \"T1021.002\": \"Remote Services: SMB/Windows Admin Shares (PsExec-style)\", \"T1048\": \"Exfiltration Over Alternative Protocol\", \"T"
+        "result_preview": "{\"matches\": [{\"id\": \"T1071.001\", \"name\": \"Application Layer Protocol: Web Protocols (C2 over HTTP/S)\", \"tactic\": \"Command and Control\", \"mitigation\": \"Block unknown destinations; proxy and inspect outbound web traffic\"}]}",
+        "summary": "Matched T1071.001 Application Layer Protocol: Web Protocols (C2 over HTTP/S)"
       },
       {
         "step": 9,
-        "tool": "mitre_lookup",
+        "tool": "query_logs",
         "args": {
-          "behavior": "T1071.001 T1059.001 beacon"
+          "host": "WORKSTATION5",
+          "source": "process",
+          "text": "powershell.exe -w",
+          "start": "2020-08-07T14:20:00",
+          "end": "2020-08-07T14:45:00",
+          "limit": 50
         },
-        "result_preview": "{\"matches\": [{\"id\": \"T1071.001\", \"name\": \"Application Layer Protocol: Web Protocols (C2 over HTTP/S)\", \"tactic\": \"Command and Control\", \"mitigation\": \"Block unknown destinations; proxy and inspect outbound web traffic\"}]}"
+        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}",
+        "summary": "0 matching events (host WORKSTATION5, source process, text powershell.exe -w)"
       }
-    ]
+    ],
+    "model": "nvidia/Nemotron-3_5-Lightning",
+    "provider": "Nebius Token Factory",
+    "run_date": "2026-10-05"
   },
   {
     "verdict": "true_positive",
     "confidence": 95,
-    "title": "LSASS Memory Access via PowerShell on WORKSTATION5",
-    "summary": "At 14:32:57 on WORKSTATION5, powershell.exe opened lsass.exe with memory-read access (0x1010), consistent with credential dumping via T1003.001. This occurred alongside sustained C2 beacon traffic from powershell.exe to external IP 10.10.10.5:80, which is outside the company's known network ranges. The user pgustavo (Domain user, lab) also launched whoami.exe from powershell, indicating reconnaissance. These behaviors form a coherent attack chain starting with the earlier ALERT-001 PowerShell C2 beacon.",
+    "title": "LSASS Memory Dumping via PowerShell on WORKSTATION5",
+    "summary": "PowerShell.exe on WORKSTATION5 opened lsass.exe with memory-read access (0x1010), consistent with credential dumping. This is part of the same attack chain as the prior ALERT-001 PowerShell C2 beacon on the same host. The user pgustavo (Domain user, lab) launched whoami.exe via PowerShell at 14:32:47, followed by lsass memory access at 14:32:57.",
     "mitre": [
       "T1003.001",
-      "T1059.001",
-      "T1071.001",
-      "T1078"
+      "T1059.001"
     ],
     "evidence": [
-      "powershell.exe opened lsass.exe with granted_access 0x1010 (memory-read) at 14:32:57.589",
-      "Sustained connections from powershell.exe to 172.18.39.5->10.10.10.5:80 beginning at 14:32:26 and continuing for at least 3 minutes",
-      "IP 10.10.10.5 flagged as suspicious: private address but NOT in company's known network ranges",
-      "whoami.exe launched from powershell.exe at 14:32:47 for reconnaissance",
-      "User pgustavo is a Domain user (lab) on WORKSTATION5",
-      "No file on disk for the powershell process (UNKNOWN in call trace)"
+      "powershell.exe opened lsass.exe with 0x1010 memory-read access per ALERT-002",
+      "whoami.exe launched by powershell.exe at 14:32:47 as child process under user pgustavo",
+      "user pgustavo is a Domain user (lab) with WORKSTATION5 as normal host",
+      "MITRE confirmation: T1003.001 (OS Credential Dumping: LSASS Memory) and T1059.001 (PowerShell execution)",
+      "prior finding ALERT-001: PowerShell C2 Beacon on WORKSTATION5 (true_positive) indicates ongoing attack"
     ],
-    "related_to_prior": "Continuation of ALERT-001 PowerShell C2 Beacon to External IP - same host, same external IP, same user pgustavo, forming a credential dumping + C2 attack chain",
+    "related_to_prior": "Same host WORKSTATION5; continues the attack chain from ALERT-001 PowerShell C2 Beacon - attacker using PowerShell for credential dumping after initial compromise",
     "recommended_actions": [
       {
         "action": "Isolate WORKSTATION5 from network immediately",
@@ -172,27 +179,22 @@
         "priority": "immediate"
       },
       {
-        "action": "Terminate all powershell.exe processes on WORKSTATION5",
+        "action": "Preserve forensic memory dump of WORKSTATION5 for analysis",
         "target": "WORKSTATION5",
         "priority": "immediate"
       },
       {
-        "action": "Reset credentials for user pgustavo and audit for lateral movement",
+        "action": "Reset credentials for user pgustavo and any accounts that may have been exposed",
         "target": "pgustavo account",
         "priority": "immediate"
       },
       {
-        "action": "Block outbound connections to 10.10.10.5 at perimeter firewall",
-        "target": "network perimeter",
-        "priority": "immediate"
-      },
-      {
-        "action": "Deploy LSA Protection/Credential Guard if not already enabled",
+        "action": "Enable LSA Protection/Credential Guard if not already active",
         "target": "domain controllers",
         "priority": "soon"
       },
       {
-        "action": "Full forensic analysis of WORKSTATION5 disk for persistence mechanisms",
+        "action": "Review PowerShell script block logging and AMSI logs for additional indicators",
         "target": "WORKSTATION5",
         "priority": "soon"
       }
@@ -205,89 +207,108 @@
         "tool": "query_logs",
         "args": {
           "host": "WORKSTATION5",
-          "start": "2020-08-07T14:30:00",
-          "text": "powershell",
+          "source": "process",
+          "start": "2020-08-07T14:25:00",
           "end": "2020-08-07T14:40:00",
           "limit": 50
         },
-        "result_preview": "{\"total_matches\": 37, \"showing\": 37, \"events\": [{\"timestamp\": \"2020-08-07 14:32:26.361000\", \"host\": \"WORKSTATION5\", \"source\": \"network\", \"event\": \"connection\", \"user\": \"pgustavo\", \"process\": \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\", \"src_ip\": \"172.18.39.5\", \"dst_ip\": \"10.10.1"
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-08-07 14:32:47.591000\", \"host\": \"WORKSTATION5\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"pgustavo\", \"process\": \"C:\\\\Windows\\\\System32\\\\whoami.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powe",
+        "summary": "1 matching event (host WORKSTATION5, source process)"
       },
       {
         "step": 2,
-        "tool": "ip_reputation",
+        "tool": "query_logs",
         "args": {
-          "ip": "10.10.10.5"
+          "host": "WORKSTATION5",
+          "source": "process",
+          "start": "2020-08-07T14:25:00",
+          "end": "2020-08-07T14:40:00",
+          "limit": 50
         },
-        "result_preview": "{\"ip\": \"10.10.10.5\", \"verdict\": \"suspicious\", \"note\": \"Private address but NOT in the company's known network ranges (not a known company asset)\"}"
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-08-07 14:32:47.591000\", \"host\": \"WORKSTATION5\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"pgustavo\", \"process\": \"C:\\\\Windows\\\\System32\\\\whoami.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powe",
+        "summary": "1 matching event (host WORKSTATION5, source process)"
       },
       {
         "step": 3,
-        "tool": "get_user_context",
+        "tool": "query_logs",
         "args": {
-          "user": "pgustavo"
+          "host": "WORKSTATION5",
+          "source": "process",
+          "text": "powershell -enc",
+          "start": "2020-08-07T14:25:00",
+          "end": "2020-08-07T14:40:00",
+          "limit": 50
         },
-        "result_preview": "{\"role\": \"Domain user (lab)\", \"normal_hosts\": [\"WORKSTATION5\"], \"admin\": \"unknown\"}"
+        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}",
+        "summary": "0 matching events (host WORKSTATION5, source process, text powershell -enc)"
       },
       {
         "step": 4,
         "tool": "query_logs",
         "args": {
           "host": "WORKSTATION5",
-          "start": "2020-08-07T14:30:00",
-          "limit": 20,
-          "end": "2020-08-07T14:40:00",
-          "text": "powershell.exe -enc or -EncodedCommand"
+          "source": "process",
+          "text": "powershell",
+          "start": "2020-08-07T14:25:00",
+          "end": "2000-08-07T14:40:00",
+          "limit": 50
         },
-        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}"
+        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}",
+        "summary": "0 matching events (host WORKSTATION5, source process, text powershell)"
       },
       {
         "step": 5,
         "tool": "query_logs",
         "args": {
           "host": "WORKSTATION5",
-          "limit": 20,
-          "text": "EncodedCommand",
-          "start": "2020-08-07T14:30:00",
-          "end": "2020-08-07T14:40:00"
+          "source": "process",
+          "text": "lsass",
+          "start": "2020-08-07T14:25:00",
+          "end": "2020-08-07T14:40:00",
+          "limit": 50
         },
-        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}"
+        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}",
+        "summary": "0 matching events (host WORKSTATION5, source process, text lsass)"
       },
       {
         "step": 6,
-        "tool": "query_logs",
+        "tool": "get_user_context",
         "args": {
-          "limit": 30,
-          "start": "2020-08-07T14:30:00",
-          "host": "WORKSTATION5",
-          "end": "2020-08-07T14:40:00",
-          "text": "process_start"
+          "user": "pgustavo"
         },
-        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-08-07 14:32:47.591000\", \"host\": \"WORKSTATION5\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"pgustavo\", \"process\": \"C:\\\\Windows\\\\System32\\\\whoami.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powe"
+        "result_preview": "{\"role\": \"Domain user (lab)\", \"normal_hosts\": [\"WORKSTATION5\"], \"admin\": \"unknown\"}",
+        "summary": "pgustavo: Domain user (lab), normally uses WORKSTATION5"
       },
       {
         "step": 7,
-        "tool": "mitre_lookup",
+        "tool": "ip_reputation",
         "args": {
-          "behavior": "T1003.001 credential dumping lsass memory access"
+          "ip": "127.0.0.1"
         },
-        "result_preview": "{\"matches\": [{\"id\": \"T1003.001\", \"name\": \"OS Credential Dumping: LSASS Memory (e.g. Mimikatz)\", \"tactic\": \"Credential Access\", \"mitigation\": \"Enable LSA Protection/Credential Guard; reset exposed passwords\"}]}"
+        "result_preview": "{\"ip\": \"127.0.0.1\", \"verdict\": \"suspicious\", \"note\": \"Private address but NOT in the company's known network ranges (not a known company asset)\"}",
+        "summary": "127.0.0.1 is suspicious: Private address but NOT in the company's known network ranges (not a known company asset)"
       },
       {
         "step": 8,
         "tool": "mitre_lookup",
         "args": {
-          "behavior": "PowerShell C2 beacon external connections"
+          "behavior": "T1003.001 lsass memory access powershell process"
         },
-        "result_preview": "{\"matches\": [{\"id\": \"T1059.001\", \"name\": \"Command and Scripting Interpreter: PowerShell\", \"tactic\": \"Execution\", \"mitigation\": \"Constrained Language Mode, script block logging, AMSI\"}, {\"id\": \"T1071.001\", \"name\": \"Application Layer Protocol: Web Protocols (C2 over HTTP/S)\", \"tactic\": \"Command and Co"
+        "result_preview": "{\"matches\": [{\"id\": \"T1003.001\", \"name\": \"OS Credential Dumping: LSASS Memory (e.g. Mimikatz)\", \"tactic\": \"Credential Access\", \"mitigation\": \"Enable LSA Protection/Credential Guard; reset exposed passwords\"}, {\"id\": \"T1059.001\", \"name\": \"Command and Scripting Interpreter: PowerShell\", \"tactic\": \"Exe",
+        "summary": "Matched T1003.001 OS Credential Dumping: LSASS Memory (e.g. Mimikatz), T1059.001 Command and Scripting Interpreter: PowerShell"
       },
       {
         "step": 9,
         "tool": "mitre_lookup",
         "args": {
-          "behavior": "lateral movement credential access"
+          "behavior": "T1059.001 PowerShell execution credential dumping"
         },
-        "result_preview": "{\"matches\": [{\"id\": \"T1021\", \"name\": \"Remote Services\", \"tactic\": \"Lateral Movement\", \"mitigation\": \"Restrict admin protocols, segment network, disable compromised account\"}, {\"id\": \"T1110\", \"name\": \"Brute Force\", \"tactic\": \"Credential Access\", \"mitigation\": \"Enforce MFA, account lockout, block sour"
+        "result_preview": "{\"matches\": [{\"id\": \"T1003.001\", \"name\": \"OS Credential Dumping: LSASS Memory (e.g. Mimikatz)\", \"tactic\": \"Credential Access\", \"mitigation\": \"Enable LSA Protection/Credential Guard; reset exposed passwords\"}, {\"id\": \"T1059.001\", \"name\": \"Command and Scripting Interpreter: PowerShell\", \"tactic\": \"Exe",
+        "summary": "Matched T1003.001 OS Credential Dumping: LSASS Memory (e.g. Mimikatz), T1059.001 Command and Scripting Interpreter: PowerShell"
       }
-    ]
+    ],
+    "model": "nvidia/Nemotron-3_5-Lightning",
+    "provider": "Nebius Token Factory",
+    "run_date": "2026-10-05"
   }
 ]

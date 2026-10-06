@@ -53,7 +53,8 @@ def main():
     if args.model:
         os.environ["NIM_MODEL"] = args.model
     if not args.mock:
-        print(f"Model: {os.environ.get('NIM_MODEL')}")
+        from .agent import provider
+        print(f"Model: {os.environ.get('NIM_MODEL')} via {provider()[0]}")
     print(f"Scenario: {scenarios.load_context(args.scenario).get('title', args.scenario)}")
 
     t0 = time.perf_counter()
@@ -78,6 +79,9 @@ def main():
     out.mkdir(exist_ok=True)
     for r in reports:
         r["model"] = "mock" if args.mock else os.environ.get("NIM_MODEL")
+        if not args.mock:
+            from .agent import provider
+            r["provider"], r["run_date"] = provider()[0], time.strftime("%Y-%m-%d")
         for t in r.get("trace", []):
             t.pop("result_full", None)
     (out / f"incidents_{args.scenario}.json").write_text(json.dumps(reports, indent=2))

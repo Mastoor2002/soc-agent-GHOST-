@@ -53,6 +53,10 @@ def run_scenario(name: str, agent: str | None) -> dict:
             r = investigate(a, toolbox, model, prior=prior, verbose=False)
             for t in r.get("trace", []):
                 t.pop("result_full", None)
+            if agent == "nim":  # record who produced it, shown by the online demo
+                from .agent import provider
+                r["model"], r["provider"] = os.environ.get("NIM_MODEL"), provider()[0]
+                r["run_date"] = time.strftime("%Y-%m-%d")
             prior.append(r)
             reports[a["id"]] = r
         found = {t for r in prior if r.get("verdict") == "true_positive" for t in r.get("mitre", [])}
@@ -111,7 +115,8 @@ def main():
         rows.append(run_scenario(name, args.agent))
     md = markdown(rows, args.agent)
     if args.agent == "nim":
-        md += f"\n\nModel: `{os.environ.get('NIM_MODEL')}`"
+        from .agent import provider
+        md += f"\n\nModel: `{os.environ.get('NIM_MODEL')}` via {provider()[0]}"
     (ROOT / "reports").mkdir(exist_ok=True)
     (ROOT / "reports" / "benchmark.md").write_text(md + "\n")
     (ROOT / "reports" / "benchmark.json").write_text(json.dumps(rows, indent=2))
