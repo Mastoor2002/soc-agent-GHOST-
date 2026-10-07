@@ -56,6 +56,20 @@ def _basename(path) -> str:
     return str(path).replace("/", "\\").split("\\")[-1].lower()
 
 
+def _first_per(rows: pd.DataFrame, keys: list[str]) -> list[dict]:
+    """The first row of each group (in log order) plus the group's size, as plain dicts,
+    sorted by the keys. Same result as looping over groupby(keys) and taking g.iloc[0],
+    but done in two table-wide operations: much faster on millions of rows and on a GPU,
+    where a Python loop over thousands of groups is the slowest thing you can do."""
+    rows = rows.dropna(subset=keys)
+    if rows.empty:
+        return []
+    firsts = rows.drop_duplicates(keys)
+    sizes = rows.groupby(keys).size().rename("n").reset_index()
+    firsts = firsts.merge(sizes, on=keys).sort_values(keys)
+    return firsts.to_dict("records")
+
+
 def detect_brute_force(df: pd.DataFrame, threshold: int = 10, window: str = "10min") -> list[dict]:
     """Many failed logins from ONE IP in a short window, followed by a success.
     A few typos (1–3 failures) are normal; 30+ in minutes is a password-guessing tool."""
@@ -88,24 +102,32 @@ def detect_lateral_movement(df: pd.DataFrame, min_hosts: int = 3, window: str = 
     Normal staff touch their own workstation plus a server or two per day."""
     alerts = []
     net = df[(df.source == "auth") & (df.outcome == "success") & (df.method == "network")]
+    span = pd.Timedelta(window)
     for user, g in net.groupby("user"):
         g = g.sort_values("timestamp")
         times, hosts = g.timestamp.tolist(), g.host.tolist()
+        # Sliding window: j moves forward only, so this is linear, not quadratic.
+        # (A nested loop here took minutes on millions of events.)
+        seen, j = {}, 0
         for i in range(len(times)):
-            # Hosts visited within `window` starting at event i
-            in_window = {h for t, h in zip(times[i:], hosts[i:])
-                         if t - times[i] <= pd.Timedelta(window)}
-            if len(in_window) >= min_hosts:
+            while j < len(times) and times[j] - times[i] <= span:
+                seen[hosts[j]] = seen.get(hosts[j], 0) + 1
+                j += 1
+            if len(seen) >= min_hosts:
+                in_window = sorted(seen)
                 alerts.append({
                     "type": "lateral_movement",
                     "severity": "high",
                     "time": str(times[i]),
                     "user": user,
-                    "hosts": sorted(in_window),
+                    "hosts": in_window,
                     "summary": f"{user} logged into {len(in_window)} hosts within {window}: "
-                               f"{', '.join(sorted(in_window))}",
+                               f"{', '.join(in_window)}",
                 })
                 break  # one alert per user is enough
+            seen[hosts[i]] -= 1  # event i leaves the window
+            if not seen[hosts[i]]:
+                del seen[hosts[i]]
     return alerts
 
 
@@ -142,28 +164,28 @@ def detect_remote_service_exec(df: pd.DataFrame, window_s: int = 120) -> list[di
     """PsExec-style lateral movement: someone logs in OVER THE NETWORK to a machine,
     and a new Windows service appears there within seconds. Services that run a
     command shell are almost never legitimate software installs."""
+    services = df[df.source == "service"].reset_index(drop=True)
+    if services.empty:
+        return []
+    services["sid"] = range(len(services))
+    who = _remote_logons_near(df, services, window_s)
+    services = services.merge(who, on="sid", how="left").sort_values("sid")
+    stems = "|".join(sh.split(".")[0] for sh in SHELLS)
+    services["runs_shell"] = services.command_line.fillna("").astype(str).str.lower().str.contains(stems)
+    services["matched"] = services["matched"].fillna(False).astype(bool)
     alerts = []
-    services = df[df.source == "service"]
-    logons = df[(df.source == "auth") & (df.outcome == "success") & (df.method == "network")]
-    for _, svc in services.iterrows():
-        near = logons[(logons.host == svc.host)
-                      & ((logons.timestamp - svc.timestamp).abs().dt.total_seconds() <= window_s)
-                      & ~logons.src_ip.isin(["::1", "127.0.0.1", "-"])]
-        runs_shell = any(sh.split(".")[0] in str(svc.command_line).lower() for sh in SHELLS)
-        if near.empty and not runs_shell:
-            continue
-        who = near.iloc[0] if len(near) else None
+    for svc in services[services.matched | services.runs_shell].to_dict("records"):
         alerts.append({
             "type": "remote_service_execution",
-            "severity": "critical" if (len(near) and runs_shell) else "high",
-            "time": str(svc.timestamp),
-            "host": svc.host,
-            "user": who.user if who is not None else svc.user,
-            "src_ip": who.src_ip if who is not None else None,
-            "service_name": svc.service_name,
-            "summary": (f"New service '{svc.service_name}' on {svc.host} runs a command shell"
-                        + (f", seconds after a network logon by {who.user} from {who.src_ip}"
-                           if who is not None else "")),
+            "severity": "critical" if (svc["matched"] and svc["runs_shell"]) else "high",
+            "time": str(svc["timestamp"]),
+            "host": svc["host"],
+            "user": svc["who_user"] if svc["matched"] else svc["user"],
+            "src_ip": svc["who_ip"] if svc["matched"] else None,
+            "service_name": svc["service_name"],
+            "summary": (f"New service '{svc['service_name']}' on {svc['host']} runs a command shell"
+                        + (f", seconds after a network logon by {svc['who_user']} from {svc['who_ip']}"
+                           if svc["matched"] else "")),
         })
     return alerts
 
@@ -176,17 +198,16 @@ def detect_encoded_powershell(df: pd.DataFrame) -> list[dict]:
                & df.command_line.astype(str).str.contains(r"\s-e(?:nc|ncodedcommand|c)?\s",
                                                           case=False, regex=True)]
     alerts = []
-    for host, g in procs.groupby("host"):
-        first = g.iloc[0]
+    for first in _first_per(procs, ["host"]):
         alerts.append({
             "type": "encoded_powershell",
             "severity": "high",
-            "time": str(first.timestamp),
-            "host": host,
-            "user": first.user,
-            "parent_process": _basename(first.parent_process),
-            "summary": f"PowerShell with a hidden (base64-encoded) command ran on {host} as "
-                       f"{first.user}, launched by {_basename(first.parent_process)}",
+            "time": str(first["timestamp"]),
+            "host": first["host"],
+            "user": first["user"],
+            "parent_process": _basename(first["parent_process"]),
+            "summary": f"PowerShell with a hidden (base64-encoded) command ran on {first['host']} as "
+                       f"{first['user']}, launched by {_basename(first['parent_process'])}",
         })
     return alerts
 
@@ -194,30 +215,38 @@ def detect_encoded_powershell(df: pd.DataFrame) -> list[dict]:
 def detect_script_beacon(df: pd.DataFrame) -> list[dict]:
     """A command shell or script engine making a web connection. Browsers talk to
     the web; PowerShell running as SYSTEM usually shouldn't — it's a classic C2 callback."""
-    net = df[(df.source == "network")
-             & _basenames(df.process).isin(SHELLS)
-             & df.dst_port.isin([80, 443, 8080, 8443])]
+    net = df[(df.source == "network") & df.dst_port.isin([80, 443, 8080, 8443])]
+    net = net[_basenames(net.process).isin(SHELLS)]  # string work only on the rows left
     alerts = []
-    for (host, dst), g in net.groupby(["host", "dst_ip"]):
-        first = g.iloc[0]
+    for first in _first_per(net, ["host", "dst_ip"]):
         alerts.append({
             "type": "script_c2_beacon",
             "severity": "high",
-            "time": str(first.timestamp),
-            "host": host,
-            "user": first.user,
-            "dst_ip": dst,
-            "summary": f"{_basename(first.process)} on {host} (as {first.user}) connected to "
-                       f"{dst}:{int(first.dst_port)} — {len(g)} connection(s)",
+            "time": str(first["timestamp"]),
+            "host": first["host"],
+            "user": first["user"],
+            "dst_ip": first["dst_ip"],
+            "summary": f"{_basename(first['process'])} on {first['host']} (as {first['user']}) connected to "
+                       f"{first['dst_ip']}:{int(first['dst_port'])} — {first['n']} connection(s)",
         })
     return alerts
 
 
-def _network_logon_near(df, host, when, window_s=120):
-    """Successful remote (network) logons on `host` within `window_s` seconds of `when`."""
+def _remote_logons_near(df, events, window_s=120):
+    """For each row of `events` (needs columns sid, host, timestamp): the FIRST successful
+    remote network logon on the same host within `window_s` seconds. One join over the
+    whole table instead of re-scanning every log for every event, so it stays fast on
+    millions of rows (and runs as GPU joins under RAPIDS)."""
     logons = df[(df.source == "auth") & (df.outcome == "success") & (df.method == "network")
-                & (df.host == host) & ~df.src_ip.isin(["::1", "127.0.0.1", "-"])]
-    return logons[(logons.timestamp - when).abs().dt.total_seconds() <= window_s]
+                & ~df.src_ip.isin(["::1", "127.0.0.1", "-"])][["host", "timestamp", "user", "src_ip"]]
+    logons = logons.reset_index(drop=True)
+    logons["lid"] = range(len(logons))  # original log order: "first" means earliest listed
+    m = events[["sid", "host", "timestamp"]].merge(logons, on="host", suffixes=("", "_l"))
+    m = m[(m.timestamp_l - m.timestamp).abs().dt.total_seconds() <= window_s]
+    m = m.sort_values(["sid", "lid"]).drop_duplicates("sid")
+    out = m[["sid", "user", "src_ip"]].rename(columns={"user": "who_user", "src_ip": "who_ip"})
+    out["matched"] = True
+    return out
 
 
 def detect_wmi_remote_exec(df: pd.DataFrame) -> list[dict]:
@@ -229,20 +258,23 @@ def detect_wmi_remote_exec(df: pd.DataFrame) -> list[dict]:
         return []
     procs = procs[(_basenames(procs.parent_process) == "wmiprvse.exe")
                   & _basenames(procs.process).isin(SHELLS)]
+    firsts = procs.drop_duplicates("host").sort_values("host").reset_index(drop=True)
+    firsts["sid"] = range(len(firsts))
+    who = _remote_logons_near(df, firsts)
+    firsts = firsts.merge(who, on="sid", how="left").sort_values("sid")
+    firsts["matched"] = firsts["matched"].fillna(False).astype(bool)
     alerts = []
-    for host, g in procs.groupby("host"):
-        first = g.iloc[0]
-        near = _network_logon_near(df, host, first.timestamp)
-        who = near.iloc[0] if len(near) else None
+    for r in firsts.to_dict("records"):
+        hit = r["matched"]
         alerts.append({
             "type": "remote_wmi_execution",
-            "severity": "critical" if who is not None else "high",
-            "time": str(first.timestamp), "host": host,
-            "user": who.user if who is not None else first.user,
-            "src_ip": who.src_ip if who is not None else None,
-            "summary": f"WMI (wmiprvse.exe) launched {_basename(first.process)} on {host} as "
-                       f"{first.user}" + (f", at the same moment as a network logon by {who.user} "
-                                           f"from {who.src_ip}" if who is not None else ""),
+            "severity": "critical" if hit else "high",
+            "time": str(r["timestamp"]), "host": r["host"],
+            "user": r["who_user"] if hit else r["user"],
+            "src_ip": r["who_ip"] if hit else None,
+            "summary": f"WMI (wmiprvse.exe) launched {_basename(r['process'])} on {r['host']} as "
+                       f"{r['user']}" + (f", at the same moment as a network logon by {r['who_user']} "
+                                         f"from {r['who_ip']}" if hit else ""),
         })
     return alerts
 
@@ -260,17 +292,17 @@ def detect_lsass_access(df: pd.DataFrame) -> list[dict]:
         return []
     acc = acc[acc.granted_access.apply(lambda a: bool(int(str(a), 16) & 0x10) if a else False)]
     alerts = []
-    for (host, proc), g in acc.groupby(["host", "process"]):
-        first = g.iloc[0]
-        from_memory = "UNKNOWN" in str(first.call_trace)
+    for first in _first_per(acc, ["host", "process"]):
+        host, proc = first["host"], first["process"]
+        from_memory = "UNKNOWN" in str(first["call_trace"])
         scripted = _basename(proc) in SHELLS
         alerts.append({
             "type": "lsass_memory_access",
             "severity": "critical" if (from_memory or scripted) else "medium",
-            "time": str(first.timestamp), "host": host, "user": first.user,
-            "process": proc, "granted_access": first.granted_access,
+            "time": str(first["timestamp"]), "host": host, "user": first["user"],
+            "process": proc, "granted_access": first["granted_access"],
             "summary": f"{_basename(proc)} on {host} opened lsass.exe with memory-read access "
-                       f"({first.granted_access})"
+                       f"({first['granted_access']})"
                        + (" from code with no file on disk (UNKNOWN in call trace)" if from_memory else ""),
         })
     return alerts
