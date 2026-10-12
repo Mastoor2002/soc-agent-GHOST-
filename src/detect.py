@@ -102,15 +102,20 @@ def detect_lateral_movement(df: pd.DataFrame, min_hosts: int = 3, window: str = 
     Normal staff touch their own workstation plus a server or two per day."""
     alerts = []
     net = df[(df.source == "auth") & (df.outcome == "success") & (df.method == "network")]
+    net = net.dropna(subset=["user"]).sort_values(["user", "timestamp"], kind="stable")
+    # Pull the three columns out ONCE, then walk them in plain Python. Looping over
+    # groupby("user") instead would copy each user's rows off the GPU separately.
+    users, times, hosts = net.user.tolist(), net.timestamp.tolist(), net.host.tolist()
     span = pd.Timedelta(window)
-    for user, g in net.groupby("user"):
-        g = g.sort_values("timestamp")
-        times, hosts = g.timestamp.tolist(), g.host.tolist()
-        # Sliding window: j moves forward only, so this is linear, not quadratic.
-        # (A nested loop here took minutes on millions of events.)
-        seen, j = {}, 0
-        for i in range(len(times)):
-            while j < len(times) and times[j] - times[i] <= span:
+    start = 0
+    while start < len(users):
+        end = start
+        while end < len(users) and users[end] == users[start]:
+            end += 1
+        # Sliding window over this user's logons: j only moves forward, so it's linear.
+        seen, j = {}, start
+        for i in range(start, end):
+            while j < end and times[j] - times[i] <= span:
                 seen[hosts[j]] = seen.get(hosts[j], 0) + 1
                 j += 1
             if len(seen) >= min_hosts:
@@ -119,15 +124,16 @@ def detect_lateral_movement(df: pd.DataFrame, min_hosts: int = 3, window: str = 
                     "type": "lateral_movement",
                     "severity": "high",
                     "time": str(times[i]),
-                    "user": user,
+                    "user": users[i],
                     "hosts": in_window,
-                    "summary": f"{user} logged into {len(in_window)} hosts within {window}: "
+                    "summary": f"{users[i]} logged into {len(in_window)} hosts within {window}: "
                                f"{', '.join(in_window)}",
                 })
                 break  # one alert per user is enough
             seen[hosts[i]] -= 1  # event i leaves the window
             if not seen[hosts[i]]:
                 del seen[hosts[i]]
+        start = end
     return alerts
 
 
@@ -193,10 +199,14 @@ def detect_remote_service_exec(df: pd.DataFrame, window_s: int = 120) -> list[di
 def detect_encoded_powershell(df: pd.DataFrame) -> list[dict]:
     """PowerShell started with -enc <base64>: the command is hidden on purpose.
     Rare in normal admin work, extremely common in attack tools. One alert per host."""
-    procs = df[(df.source == "process")
-               & df.process.astype(str).str.lower().str.endswith(("powershell.exe", "pwsh.exe"))
-               & df.command_line.astype(str).str.contains(r"\s-e(?:nc|ncodedcommand|c)?\s",
-                                                          case=False, regex=True)]
+    # Written so every step runs on the GPU: filter rows first, lowercase once, then a
+    # plain regex. (case=False and endswith(tuple) aren't GPU operations in RAPIDS, so
+    # they silently fell back to the CPU and made this detector slower on the GPU.)
+    procs = df[df.source == "process"]
+    name = procs.process.fillna("").astype(str).str.lower()
+    procs = procs[name.str.endswith("powershell.exe") | name.str.endswith("pwsh.exe")]
+    cmd = procs.command_line.fillna("").astype(str).str.lower()
+    procs = procs[cmd.str.contains(r"\s-e(?:nc|ncodedcommand|c)?\s", regex=True)]
     alerts = []
     for first in _first_per(procs, ["host"]):
         alerts.append({
