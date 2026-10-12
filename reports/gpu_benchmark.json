@@ -1,0 +1,42 @@
+[
+  {
+    "engine": "CPU (pandas)",
+    "rows": 5000000,
+    "alerts": 1771,
+    "seconds": {
+      "Load Parquet": 11.894,
+      "All 8 detectors": 25.745,
+      "detect_brute_force": 1.014,
+      "detect_lateral_movement": 0.715,
+      "detect_exfiltration": 3.215,
+      "detect_remote_service_exec": 6.476,
+      "detect_encoded_powershell": 0.472,
+      "detect_script_beacon": 1.352,
+      "detect_wmi_remote_exec": 7.01,
+      "detect_lsass_access": 3.567
+    },
+    "events_per_second": 194212,
+    "machine": "Google Colab (CPU)",
+    "date": "2026-10-11"
+  },
+  {
+    "engine": "GPU (RAPIDS cudf.pandas)",
+    "rows": 5000000,
+    "alerts": 1771,
+    "seconds": {
+      "Load Parquet": 0.088,
+      "All 8 detectors": 2.894,
+      "detect_brute_force": 0.39,
+      "detect_lateral_movement": 1.621,
+      "detect_exfiltration": 0.144,
+      "detect_remote_service_exec": 0.134,
+      "detect_encoded_powershell": 0.122,
+      "detect_script_beacon": 0.131,
+      "detect_wmi_remote_exec": 0.165,
+      "detect_lsass_access": 0.14
+    },
+    "events_per_second": 1727951,
+    "machine": "Google Colab, NVIDIA Tesla T4, RAPIDS cudf 26.06",
+    "date": "2026-10-11"
+  }
+]

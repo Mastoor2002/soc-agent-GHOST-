@@ -1,6 +1,6 @@
 # 👻 GHOST — Generative Hunting & Operations Security Toolkit
 
-An AI security analyst that hunts attacks in your logs, investigates them like a human expert with **NVIDIA Nemotron** (served through **Nebius Token Factory** or **NVIDIA NIM**), and recommends fixes that a human approves. Detection is written to run GPU-accelerated via **RAPIDS**.
+An AI security analyst that hunts attacks in your logs, investigates them like a human expert with **NVIDIA Nemotron** (served through **Nebius Token Factory** or **NVIDIA NIM**), and recommends fixes that a human approves. Detection runs GPU-accelerated with **NVIDIA RAPIDS**: on 5 million events, an NVIDIA T4 runs all 8 detectors **8.9× faster** than the CPU, with identical alerts.
 
 Tested on a synthetic attack **and on real attack recordings** from the [OTRF Security Datasets](https://github.com/OTRF/Security-Datasets) project.
 
@@ -55,17 +55,17 @@ Real scenarios come from the [OTRF Security Datasets](https://github.com/OTRF/Se
 
 ## Benchmark
 
-First Nebius run (October 5, 2026), `nvidia/Nemotron-3_5-Lightning` via **Nebius Token Factory**:
+Final run (October 5, 2026), `nvidia/Nemotron-3_5-Lightning` via **Nebius Token Factory**:
 
 | Scenario | Events | Answer key | Detection | Agent | Agent time |
 |---|---|---|---|---|---|
-| Practice attack (synthetic) | 1,270 | T1021, T1048, T1078, T1110 | 3/4 | 4/4 | 28 s |
-| Mimikatz LogonPasswords (OTRF) | 6,015 | T1003.001 | 1/1 | 1/1 | 17 s |
-| Empire Invoke-PsExec (OTRF) | 4,335 | T1021 | 1/1 | 1/1 | 30 s |
-| Empire Invoke-SMBExec (OTRF) | 7,489 | T1021.002 | 1/1 | 1/1 | 40 s |
-| Empire Invoke-WMI (OTRF) | 6,352 | T1047 | 1/1 | 1/1 | 32 s |
+| Practice attack (synthetic) | 1,270 | T1021, T1048, T1078, T1110 | 3/4 | 4/4 | 32 s |
+| Mimikatz LogonPasswords (OTRF) | 6,015 | T1003.001 | 1/1 | 1/1 | 18 s |
+| Empire Invoke-PsExec (OTRF) | 4,335 | T1021 | 1/1 | 1/1 | 36 s |
+| Empire Invoke-SMBExec (OTRF) | 7,489 | T1021.002 | 1/1 | 1/1 | 38 s |
+| Empire Invoke-WMI (OTRF) | 6,352 | T1047 | 1/1 | 1/1 | 54 s |
 
-8/8 answer-key techniques, 0 hallucinated techniques, and the legitimate Azure agent correctly dismissed as a false positive. The same model on NVIDIA's free endpoint (October 3) also scored 8/8 but took 1,312 s of agent time, against 147 s on Nebius. A later run that night, after tightening the grounding check, scored the same 8/8 in 178 s.
+8/8 answer-key techniques, 0 claims rejected by the grounding check, 1 report repaired by self-correction, and the legitimate Azure agent correctly dismissed as a false positive. 178 s of agent time for 15 alerts, about 12 s per alert. The same model on NVIDIA's free endpoint (October 3) also scored 8/8 but took 1,312 s. An earlier Nebius run the same day (147 s) looked clean but had a grounding-check loophole; the table above is the run after it was closed.
 
 **Choosing a provider:** GHOST talks to any OpenAI-compatible endpoint. Set `NIM_BASE_URL`, `NIM_MODEL` and the matching key in `.env` (see `.env.example` for NVIDIA and Nebius settings). No code changes.
 
@@ -78,6 +78,35 @@ Writes `reports/benchmark.md`, a results table across all scenarios.
 **Honest history:** when we first ran the detectors built for PsExec on the three new real attacks, they caught SMBExec (a variant) unchanged, caught only the side effects of the WMI attack, and **missed the Mimikatz password theft entirely**. That's why the WMI and LSASS detectors exist.
 
 Each scenario is a folder in `data/` with `logs.jsonl`, `ground_truth.json` (never read by detectors or the agent), and `context.json` (company IP ranges, employee directory, threat intel).
+
+### GPU benchmark (NVIDIA RAPIDS)
+
+The real datasets are small, so `src/gpu_benchmark.py` copies all 5 scenarios 197 times (each copy shifted a day, with its own host names) into **5,000,000 events** and times the detection layer. Same code both times; only the launch changes:
+
+```bash
+python -m src.gpu_benchmark --rows 5000000                       # CPU (pandas)
+python -m cudf.pandas -c "import sys; sys.path.insert(0, '.'); sys.argv = ['gpu_benchmark', '--rows', '5000000']; from src.gpu_benchmark import main; main()"   # GPU
+```
+Or open `GHOST_GPU_benchmark.ipynb` in Google Colab with a T4 GPU and press Run all.
+
+Google Colab, NVIDIA Tesla T4, RAPIDS cudf 26.06 (October 11, 2026):
+
+| Step (5,000,000 events) | CPU (s) | GPU (s) | Speed-up |
+|---|---|---|---|
+| Load Parquet | 11.894 | 0.088 | **135.2×** |
+| **All 8 detectors** | **25.745** | **2.894** | **8.9×** |
+| brute_force | 1.014 | 0.390 | 2.6× |
+| lateral_movement | 0.716 | 1.621 | 0.4× |
+| exfiltration | 3.215 | 0.144 | 22.3× |
+| remote_service_exec | 6.476 | 0.135 | 48.1× |
+| encoded_powershell | 0.472 | 0.122 | 3.9× |
+| script_beacon | 1.352 | 0.131 | 10.3× |
+| wmi_remote_exec | 7.010 | 0.165 | 42.5× |
+| lsass_access | 3.567 | 0.140 | 25.4× |
+
+Both engines raised the same **1,771 alerts**. The GPU processes about 1.7 million events per second.
+
+**What scaling taught us:** the first attempt at 5 million events never finished. Two detectors re-scanned the whole log for every suspicious event, which is fine at 25,000 events and hopeless at millions. Rewriting them as single table-wide joins fixed it. The first GPU run was then only 1.5× faster, because two detectors used operations RAPIDS can't run on the GPU (a case-insensitive regex, and a Python loop over groups), so the work silently fell back to the CPU. After rewriting those, 8.9×. Every rewrite was checked to produce identical alerts on all 5 real scenarios. Lateral movement is still faster on the CPU: it walks each user's logons in time order, which is sequential Python work a GPU can't speed up.
 
 ### Dashboard
 
@@ -148,10 +177,11 @@ python -m cudf.pandas -m src.main
 - [x] **Real data.** OTRF Empire PsExec recording, with Windows log normalization, 3 new detectors, and a PowerShell decoder tool
 - [x] **More real data.** 4 OTRF recordings (PsExec, SMBExec, WMI, Mimikatz), WMI and LSASS detectors, a real-world false-positive check, and a benchmark across all scenarios
 - [x] **Guardrails.** Self-correction for unreadable reports; grounding check that rejects techniques the AI claims without evidence
-- [ ] **Week 3: GPU proof.** Scale logs to millions of rows; benchmark pandas (CPU) vs `cudf.pandas` (GPU) on Nebius
+- [x] **GPU proof.** 5 million events: all 8 detectors 8.9× faster on an NVIDIA T4 with RAPIDS `cudf.pandas`, identical alerts
 - [ ] **Week 3: RAG.** Replace the mini MITRE table with vector search over the full ATT&CK dataset
 - [x] **Dashboard.** Live investigation view, attack chain, human-approved actions *(done early)*
-- [ ] **Week 4: Polish.** Metrics (accuracy, false positives, time to triage), a 3-minute demo video, and the submission
+- [x] **Polish.** Metrics (accuracy, false positives, time to triage) and a narrated demo video
+- [ ] **Submission** on Devpost
 
 ---
 
