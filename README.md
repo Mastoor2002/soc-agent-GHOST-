@@ -8,6 +8,17 @@ Built for the Nebius x NVIDIA Global AI Hackathon (deadline: Oct 30, 2026).
 
 ---
 
+## Try it (for judges)
+
+**Live demo: [ghost-soc.streamlit.app](https://ghost-soc.streamlit.app/)** · **Video: [youtu.be/exvDhssdyN4](https://youtu.be/exvDhssdyN4)**
+
+1. **Look (30 seconds).** Pick a real attack in the sidebar, e.g. *Empire Invoke-PsExec (OTRF)*. Nemotron's saved investigation loads instantly: the attack chain, each alert's verdict, evidence, MITRE ATT&CK techniques, and the step-by-step trail of what the AI did.
+2. **Watch it run (1 minute).** Choose **Nemotron (real AI)** and press **▶ Run live investigation**. Nemotron, served by Nebius Token Factory, investigates every alert live. Each visitor gets a few live runs; **Practice** mode (a scripted replay, no AI) is unlimited.
+3. **Check the false alarm.** Pick *Empire Invoke-SMBExec* and open the medium LSASS alert: Microsoft's Azure agent, correctly dismissed as a false positive, matching the dataset's answer key.
+4. **Run it yourself.** See Quick start below: `python -m src.main --mock` needs no API key.
+
+---
+
 ## How it works (the big picture)
 
 ```
@@ -114,6 +125,16 @@ Both engines raised the same **1,771 alerts**. The GPU processes about 1.7 milli
 streamlit run dashboard.py
 ```
 Opens a web page at http://localhost:8501. Press **▶ Run live investigation** to watch the agent work.
+
+**Hosting it publicly (Streamlit Community Cloud):** add these in the app's *Settings → Secrets*, never in the repo:
+```toml
+NEBIUS_API_KEY = "your-nebius-key"
+NIM_BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
+NIM_MODEL = "nvidia/Nemotron-3_5-Lightning"
+GHOST_PUBLIC = "1"              # visitors' live runs never overwrite the saved results
+GHOST_SESSION_LIVE_RUNS = "3"   # live Nemotron runs per visitor
+GHOST_DAILY_LIVE_RUNS = "40"    # live Nemotron runs per day, all visitors together
+```
 
 ---
 

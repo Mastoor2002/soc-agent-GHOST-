@@ -12,7 +12,9 @@ Then open the link it prints (usually http://localhost:8501).
 """
 import json
 import os
+import threading
 import time
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -25,6 +27,25 @@ from src.tools import MITRE, Toolbox, summarize_step
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
+
+# On Streamlit Community Cloud there is no .env file: the key lives in the app's
+# private "Secrets" settings instead. Copy those into the environment so the rest
+# of GHOST reads them exactly like a local .env. (Locally there are no secrets.)
+SECRET_KEYS = ("NEBIUS_API_KEY", "NVIDIA_API_KEY", "NIM_BASE_URL", "NIM_MODEL",
+               "GHOST_PUBLIC", "GHOST_SESSION_LIVE_RUNS", "GHOST_DAILY_LIVE_RUNS")
+try:
+    for k in SECRET_KEYS:
+        if k in st.secrets and not os.environ.get(k):
+            os.environ[k] = str(st.secrets[k])
+except Exception:  # no secrets file: running locally with .env
+    pass
+
+# Public mode (set GHOST_PUBLIC = "1" in Secrets): visitors can run live Nemotron
+# investigations, but only a few each, and their runs never replace the saved
+# results that every other visitor sees first.
+PUBLIC = os.environ.get("GHOST_PUBLIC") == "1"
+SESSION_LIVE_MAX = int(os.environ.get("GHOST_SESSION_LIVE_RUNS", "3"))
+DAILY_LIVE_MAX = int(os.environ.get("GHOST_DAILY_LIVE_RUNS", "40"))
 
 st.set_page_config(page_title="GHOST", page_icon="👻", layout="wide")
 
@@ -46,6 +67,36 @@ def load_everything(scenario: str):
     return df, alerts, time.perf_counter() - t0
 
 
+@st.cache_resource  # ONE counter shared by every visitor of this server
+def live_budget():
+    return {"day": None, "runs": 0, "lock": threading.Lock()}
+
+
+def live_runs_left() -> tuple[int, str]:
+    """How many live Nemotron runs this visitor may start now, and why not if zero."""
+    if not PUBLIC:
+        return 1, ""
+    b = live_budget()
+    with b["lock"]:
+        if b["day"] != date.today():
+            b["day"], b["runs"] = date.today(), 0
+        today_left = DAILY_LIVE_MAX - b["runs"]
+    mine_left = SESSION_LIVE_MAX - ss.get("live_runs", 0)
+    if today_left <= 0:
+        return 0, "Today's live runs are used up. Try Practice mode, or come back tomorrow."
+    if mine_left <= 0:
+        return 0, f"You've used your {SESSION_LIVE_MAX} live runs. Practice mode is unlimited."
+    return min(today_left, mine_left), ""
+
+
+def spend_live_run():
+    if PUBLIC:
+        b = live_budget()
+        with b["lock"]:
+            b["runs"] += 1
+        ss.live_runs = ss.get("live_runs", 0) + 1
+
+
 ss = st.session_state
 ss.setdefault("reports", {})     # alert_id -> report
 ss.setdefault("decisions", {})   # "ALERT-001:0" -> "approved" / "rejected"
@@ -59,16 +110,25 @@ with st.sidebar:
                             format_func=lambda n: scenarios.load_context(n).get("title", n))
     if ss.get("scenario") != scenario:  # switching scenario clears old results
         ss.scenario, ss.reports, ss.decisions = scenario, {}, {}
-    mode = st.radio("Detective", ["Practice (scripted)", "Nemotron (real AI)"],
-                    help="Practice mode needs no API key. Real AI uses your NVIDIA key from .env.")
     provider_name, _, key = provider()
     has_key = key is not None
+    mode = st.radio("Detective", ["Practice (scripted)", "Nemotron (real AI)"],
+                    index=1 if has_key else 0,
+                    help="Practice replays a scripted investigation instantly, no API key. "
+                         "Nemotron is the real AI investigating live.")
+    blocked = ""
     if mode.startswith("Nemotron"):
         st.caption(f"Model: `{os.environ.get('NIM_MODEL', 'not set')}` via {provider_name}")
         if not has_key:
-            st.error(f"No API key for {provider_name} in .env")
+            blocked = f"No API key for {provider_name} on this server."
+        else:
+            left, blocked = live_runs_left()
+            if PUBLIC and left:
+                st.caption(f"Live runs left for you: {left}. Each takes about 20-60 seconds.")
+        if blocked:
+            st.warning(blocked)
     run = st.button("▶ Run live investigation", type="primary", use_container_width=True,
-                    disabled=mode.startswith("Nemotron") and not has_key)
+                    disabled=bool(blocked))
     REPORTS = ROOT / "reports" / f"incidents_{scenario}.json"
     if REPORTS.exists() and st.button("📂 Load last saved run", use_container_width=True):
         ss.reports = {r["alert_id"]: r for r in json.loads(REPORTS.read_text())}
@@ -77,8 +137,9 @@ with st.sidebar:
         ss.reports, ss.decisions = {}, {}
         st.rerun()
     st.divider()
-    st.caption("Tip for demos: run once with Nemotron, then use **Load last saved run** "
-               "so you never wait on the API while presenting.")
+    if not PUBLIC:
+        st.caption("Tip for demos: run once with Nemotron, then use **Load last saved run** "
+                   "so you never wait on the API while presenting.")
 
 df, alerts, detect_secs = load_everything(scenario)
 ctx = scenarios.load_context(scenario)
@@ -94,6 +155,22 @@ if ss.get("autoloaded") != scenario and not ss.reports and REPORTS.exists():
 st.title("👻 GHOST")
 st.caption("Generative Hunting & Operations Security Toolkit · fast detection finds the "
            "suspicious activity, a Nemotron agent investigates each alert like a human analyst.")
+with st.expander("🧪 How to test GHOST", expanded=not ss.get("autoloaded")):
+    st.markdown(
+        "1. **Look (30 seconds).** Pick a real attack in the sidebar, for example "
+        "*Empire Invoke-PsExec*. Below you'll see Nemotron's saved investigation: the attack "
+        "chain, each alert's verdict, evidence, MITRE ATT&CK techniques, and the step-by-step "
+        "trail of what the AI did.\n"
+        "2. **Watch it run (1 minute).** Choose **Nemotron (real AI)** and press "
+        "**▶ Run live investigation**. Nemotron, served by Nebius Token Factory, investigates "
+        "every alert in front of you. **Practice** mode replays a scripted run with no AI.\n"
+        "3. **Check the false alarm.** Pick *Empire Invoke-SMBExec* and open the medium "
+        "LSASS alert: it's Microsoft's Azure agent, and the green box shows GHOST called it "
+        "a false positive, matching the dataset's answer key.\n"
+        "4. **Run it yourself.** Clone "
+        "[the repo](https://github.com/Mastoor2002/soc-agent-GHOST-) and run "
+        "`python -m src.main --mock` (no key needed), or "
+        "`python -m src.benchmark` for detection on all 5 scenarios.")
 with st.container(border=True):
     st.markdown(f"**{ctx.get('title', scenario)}**  \n{ctx.get('description', '')}")
     if ctx.get("source_url"):
@@ -174,12 +251,14 @@ def run_live():
             t.pop("result_full", None)
     # Only real Nemotron runs replace the saved results; a practice run never
     # overwrites them (on a shared server, visitors would erase each other's view)
-    if mode.startswith("Nemotron"):
+    if mode.startswith("Nemotron") and not PUBLIC:
         REPORTS.parent.mkdir(exist_ok=True)
         REPORTS.write_text(json.dumps(prior, indent=2))
 
 
 if run:
+    if mode.startswith("Nemotron"):
+        spend_live_run()
     ss.reports, ss.decisions, ss.showing_saved = {}, {}, False
     st.subheader("Live investigation")
     run_live()
