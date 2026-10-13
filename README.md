@@ -197,3 +197,7 @@ soc-agent/
 ├── requirements.txt
 └── .env.example            # copy to .env and add your NVIDIA key
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
