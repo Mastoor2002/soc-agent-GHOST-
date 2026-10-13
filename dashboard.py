@@ -155,7 +155,9 @@ if ss.get("autoloaded") != scenario and not ss.reports and REPORTS.exists():
 st.title("👻 GHOST")
 st.caption("Generative Hunting & Operations Security Toolkit · fast detection finds the "
            "suspicious activity, a Nemotron agent investigates each alert like a human analyst.")
-with st.expander("🧪 How to test GHOST", expanded=not ss.get("autoloaded")):
+first_visit = not ss.get("seen_howto")  # open the guide on a visitor's first page load
+ss.seen_howto = True
+with st.expander("🧪 How to test GHOST", expanded=first_visit):
     st.markdown(
         "1. **Look (30 seconds).** Pick a real attack in the sidebar, for example "
         "*Empire Invoke-PsExec*. Below you'll see Nemotron's saved investigation: the attack "
