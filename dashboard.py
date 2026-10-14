@@ -227,7 +227,10 @@ with st.expander("🧪 How to test GHOST", expanded=first_visit):
         "3. **Check the false alarm.** Pick *Empire Invoke-SMBExec* and open the medium "
         "LSASS alert: it's Microsoft's Azure agent, and the green box shows GHOST called it "
         "a false positive, matching the dataset's answer key.\n"
-        "4. **Run it yourself.** Clone "
+        "4. **Bring your own logs.** Choose **📤 Upload your own logs** at the bottom of the "
+        "scenario menu, download the sample file there (or use your own), upload it and press "
+        "**▶ Run live investigation**.\n"
+        "5. **Run it yourself.** Clone "
         "[the repo](https://github.com/Mastoor2002/soc-agent-GHOST-) and run "
         "`python -m src.main --mock` (no key needed), or "
         "`python -m src.benchmark` for detection on all 5 scenarios.")
