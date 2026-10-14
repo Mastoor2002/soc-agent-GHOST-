@@ -1,6 +1,9 @@
 [theme]
 base = "dark"
 primaryColor = "#76b900"
+backgroundColor = "#060a0d"
+secondaryBackgroundColor = "#111a20"
+textColor = "#e4e9ec"
 
 [server]
 maxUploadSize = 50  # MB, matches the limit in src/ingest.py
