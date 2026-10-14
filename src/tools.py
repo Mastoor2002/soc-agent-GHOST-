@@ -16,13 +16,20 @@ functions. That's an important security property worth mentioning to judges.
 
 Company knowledge (IP ranges, employee directory, threat intel) comes from the
 scenario's context.json, so the same tools work on any dataset.
-Upgrade ideas: ip_reputation -> AbuseIPDB or VirusTotal API; mitre_lookup ->
-vector search over the full MITRE ATT&CK dataset (that's the RAG part of the plan).
+mitre_lookup searches two things: a small hand-checked table (MITRE below) whose
+matches count as evidence for the grounding check, and the FULL MITRE ATT&CK
+knowledge base (data/attack/, ~700 techniques, built by build_attack_index.py),
+whose search results are reference only: the agent can read official names,
+descriptions and mitigations, but a technique it finds there still needs evidence.
+Upgrade idea: ip_reputation -> AbuseIPDB or VirusTotal API.
 """
 import base64
 import ipaddress
 import json
+import math
 import re
+from collections import Counter
+from pathlib import Path
 
 import pandas as pd
 
@@ -90,6 +97,63 @@ KEYWORDS = {"brute": "T1110", "password": "T1110", "failed login": "T1110",
             "lsass": "T1003.001", "credential dump": "T1003.001", "mimikatz": "T1003.001",
             "password hash": "T1003.001", "memory read": "T1003.001"}
 
+# ---- Full MITRE ATT&CK knowledge base, searched with BM25 ----
+# BM25 is the classic search-engine ranking: a word counts more when it is rare
+# across all techniques and appears in this one. No extra libraries, no GPU, and
+# every result can be explained, which matters for a security tool.
+ATTACK_FILE = Path(__file__).resolve().parent.parent / "data" / "attack" / "enterprise_attack.json"
+STOP = set("a an and are as at be by can for from has have in into is it its may of on or "
+           "that the their them these this to use used uses using via was were which with "
+           "adversaries adversary".split())
+
+
+def _tokens(text: str) -> list[str]:
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    return [w[:-1] if len(w) > 4 and w.endswith("s") else w for w in words if w not in STOP]
+
+
+class AttackIndex:
+    def __init__(self, path=ATTACK_FILE):
+        data = json.loads(Path(path).read_text(encoding="utf-8")) if Path(path).exists() else {"techniques": {}}
+        self.version = data.get("attack_version")
+        self.techniques = data["techniques"]
+        self.docs = {}
+        for tid, t in self.techniques.items():
+            # the name counts three times: it is the most precise description
+            text = " ".join([tid, t["name"]] * 3 + t["tactics"] + [t["summary"]])
+            self.docs[tid] = Counter(_tokens(text))
+        n = len(self.docs) or 1
+        self.lengths = {tid: sum(c.values()) for tid, c in self.docs.items()}
+        self.avg_len = sum(self.lengths.values()) / n
+        df = Counter(w for c in self.docs.values() for w in c)
+        self.idf = {w: math.log(1 + (n - f + 0.5) / (f + 0.5)) for w, f in df.items()}
+
+    def search(self, query: str, k: int = 5, exclude=()) -> list[dict]:
+        ids = [t for t in re.findall(r"\bT\d{4}(?:\.\d{3})?\b", query.upper()) if t in self.techniques]
+        q = _tokens(query)
+        scores = {}
+        for tid, c in self.docs.items():
+            s = 0.0
+            for w in q:
+                f = c.get(w)
+                if f:
+                    s += self.idf[w] * f * 2.2 / (f + 1.2 * (0.25 + 0.75 * self.lengths[tid] / self.avg_len))
+            if s:
+                scores[tid] = s
+        ranked = ids + [t for t, _ in sorted(scores.items(), key=lambda x: -x[1]) if t not in ids]
+        return [{"id": t, **{f: self.techniques[t][f] for f in ("name", "tactics", "mitigations")},
+                 "summary": self.techniques[t]["summary"][:240]}
+                for t in ranked if t not in exclude][:k]
+
+
+ATTACK = AttackIndex()
+
+
+def technique_name(tid: str) -> str:
+    """Display name for any technique ID: the hand-checked table first, then full ATT&CK."""
+    return MITRE.get(tid, {}).get("name") or ATTACK.techniques.get(tid, {}).get("name", "")
+
+
 # Columns that are mostly noise for the agent — dropped from query results
 HIDE = {"raw_event_id"}
 MAX_FIELD = 180  # long command lines are cut; use decode_command for the full text
@@ -153,6 +217,12 @@ class Toolbox:
             return {"ip": ip, "verdict": "invalid address"}
         if any(addr in n for n in self.subnets):
             return {"ip": ip, "verdict": "internal", "note": "Inside the company's known network ranges"}
+        if addr.is_private and not self.ctx.get("network_info", True):
+            # Uploaded logs: we don't know the company's ranges, so say so, don't guess
+            return {"ip": ip, "verdict": "private, ownership unknown",
+                    "note": "Private (internal-style) address. These uploaded logs come with no "
+                            "list of company network ranges, so it can't be confirmed as a "
+                            "company asset or ruled out as attacker infrastructure."}
         if addr.is_private:
             return {"ip": ip, "verdict": "suspicious",
                     "note": "Private address but NOT in the company's known network ranges "
@@ -171,11 +241,21 @@ class Toolbox:
         # Technique IDs typed into the query ("T1021.002 T1543.003") are matched directly
         ids |= {t for t in re.findall(r"\bT\d{4}(?:\.\d{3})?\b", behavior.upper()) if t in MITRE}
         ids = sorted(ids)
-        if ids:
-            return {"matches": [{"id": i, **MITRE[i]} for i in ids]}
-        # No match: show the whole (small) list so the model picks instead of guessing forever
-        return {"matches": [], "note": "No keyword match. Choose from these known techniques:",
-                "available": {i: m["name"] for i, m in MITRE.items()}}
+        # "matches" (hand-checked table) must come first in this dict: the grounding
+        # check counts only the matches as evidence and ignores everything after them.
+        result = {"matches": [{"id": i, **MITRE[i]} for i in ids]}
+        # Full-ATT&CK search only when the hand-checked table has nothing: on familiar
+        # behavior its extra suggestions are noise that invites unsupported claims.
+        # IDs the agent typed that the table doesn't know are always looked up.
+        typed = [t for t in re.findall(r"\bT\d{4}(?:\.\d{3})?\b", behavior.upper()) if t not in MITRE]
+        related = ATTACK.search(behavior, k=5, exclude=set(ids)) if (not ids or typed) else []
+        if related:
+            result["attack_search"] = related
+            result["note"] = ("attack_search lists the closest techniques in the full MITRE "
+                              f"ATT&CK knowledge base (v{ATTACK.version}). They are reference, "
+                              "not evidence: claim one only if the logs you examined show that "
+                              "behavior. Unsupported claims are rejected.")
+        return result
 
     def get_user_context(self, user):
         users = self.ctx.get("users", {})
@@ -346,6 +426,16 @@ def summarize_step(name: str, args: dict, result: str) -> str:
     if name == "mitre_lookup":
         ids = [m["id"] for m in r.get("matches", [])] if isinstance(r.get("matches"), list) \
             else re.findall(r'"id": "(T[\d.]+)"', result)
-        return ("Matched " + ", ".join(f"{i} {MITRE.get(i, {}).get('name', '')}".strip() for i in ids[:3])
-                if ids else "No direct technique match")
+        if isinstance(r.get("matches"), list):
+            ids = [m["id"] for m in r["matches"]]
+            near = [m["id"] for m in r.get("attack_search", [])]
+        else:  # truncated preview: matches come first in the text
+            head, _, tail = result.partition('"attack_search"')
+            ids, near = re.findall(r'"id": "(T[\d.]+)"', head), re.findall(r'"id": "(T[\d.]+)"', tail)
+        out = ("Matched " + ", ".join(f"{i} {technique_name(i)}".strip() for i in ids[:3])
+               if ids else "No direct technique match")
+        if near:
+            out += "; full ATT&CK search suggests " + ", ".join(
+                f"{i} {technique_name(i)}".strip() for i in near[:2])
+        return out
     return result[:120]

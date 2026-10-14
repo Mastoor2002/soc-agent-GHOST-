@@ -21,9 +21,9 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from src import detect, scenarios
+from src import detect, ingest, scenarios
 from src.agent import MockModel, NIMModel, investigate, provider
-from src.tools import MITRE, Toolbox, summarize_step
+from src.tools import Toolbox, summarize_step, technique_name
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
@@ -67,6 +67,19 @@ def load_everything(scenario: str):
     return df, alerts, time.perf_counter() - t0
 
 
+UPLOAD = "__upload__"
+MAX_UPLOAD_ALERTS = 5  # live runs on uploads investigate at most this many (public mode)
+SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+
+@st.cache_data(max_entries=3, show_spinner="Reading your logs...")
+def load_upload(name: str, data: bytes, ranges: tuple):
+    df, fmt = ingest.to_events(name, data)
+    t0 = time.perf_counter()
+    alerts = detect.run_all(df)
+    return df, alerts, time.perf_counter() - t0, ingest.context(name, len(df), fmt, list(ranges))
+
+
 @st.cache_resource  # ONE counter shared by every visitor of this server
 def live_budget():
     return {"day": None, "runs": 0, "lock": threading.Lock()}
@@ -106,10 +119,22 @@ ss.setdefault("decisions", {})   # "ALERT-001:0" -> "approved" / "rejected"
 with st.sidebar:
     st.header("👻 GHOST control panel")
     names = scenarios.list_scenarios()
-    scenario = st.selectbox("Scenario", names,
-                            format_func=lambda n: scenarios.load_context(n).get("title", n))
-    if ss.get("scenario") != scenario:  # switching scenario clears old results
-        ss.scenario, ss.reports, ss.decisions = scenario, {}, {}
+    scenario = st.selectbox("Scenario", names + [UPLOAD],
+                            format_func=lambda n: "📤 Upload your own logs" if n == UPLOAD
+                            else scenarios.load_context(n).get("title", n))
+    uploaded, ranges_text = None, ""
+    if scenario == UPLOAD:
+        uploaded = st.file_uploader("Log file", type=["jsonl", "json", "csv"],
+                                    help="GHOST-format events, or raw Windows Security/Sysmon "
+                                         "events as JSON lines. Up to 50 MB.")
+        ranges_text = st.text_input("Your network ranges (optional)",
+                                    placeholder="10.0.0.0/8, 192.168.1.0/24",
+                                    help="Addresses inside these count as company assets. Left "
+                                         "empty, GHOST says it can't tell, instead of guessing.")
+    scenario_key = (f"upload:{uploaded.name}:{uploaded.size}:{ranges_text}" if uploaded
+                    else scenario)
+    if ss.get("scenario") != scenario_key:  # switching scenario clears old results
+        ss.scenario, ss.reports, ss.decisions = scenario_key, {}, {}
     provider_name, _, key = provider()
     has_key = key is not None
     mode = st.radio("Detective", ["Practice (scripted)", "Nemotron (real AI)"],
@@ -129,8 +154,8 @@ with st.sidebar:
             st.warning(blocked)
     run = st.button("▶ Run live investigation", type="primary", use_container_width=True,
                     disabled=bool(blocked))
-    REPORTS = ROOT / "reports" / f"incidents_{scenario}.json"
-    if REPORTS.exists() and st.button("📂 Load last saved run", use_container_width=True):
+    REPORTS = None if scenario == UPLOAD else ROOT / "reports" / f"incidents_{scenario}.json"
+    if REPORTS and REPORTS.exists() and st.button("📂 Load last saved run", use_container_width=True):
         ss.reports = {r["alert_id"]: r for r in json.loads(REPORTS.read_text())}
         ss.decisions, ss.showing_saved = {}, True
     if ss.reports and st.button("Clear results", use_container_width=True):
@@ -141,12 +166,45 @@ with st.sidebar:
         st.caption("Tip for demos: run once with Nemotron, then use **Load last saved run** "
                    "so you never wait on the API while presenting.")
 
-df, alerts, detect_secs = load_everything(scenario)
-ctx = scenarios.load_context(scenario)
+if scenario == UPLOAD and not uploaded:
+    st.title("📤 Investigate your own logs")
+    st.markdown(
+        "Upload a log file in the sidebar and GHOST runs its 8 detectors on it, then Nemotron "
+        "investigates each alert, exactly as with the built-in attacks.\n\n"
+        "**Accepted formats** (`.jsonl`, `.json` or `.csv`, up to 50 MB):\n"
+        "- **GHOST format:** one event per line with `timestamp`, `source` (auth, process, "
+        "service, network, process_access) and fields like `user`, `host`, `src_ip`, `dst_ip`, "
+        "`process`, `parent_process`, `command_line`.\n"
+        "- **Raw Windows event logs** as JSON lines with `EventID`, `Channel`, `Hostname`, "
+        "`@timestamp`: Windows Security (4624/4625 logons, 4688 processes, 4697 services), "
+        "System 7045 and Sysmon 1/3/10, the way OTRF Security Datasets, Winlogbeat and many "
+        "SIEM exports store them.\n\n"
+        "Uploads have no answer key and no company directory, so GHOST's verdicts are its own "
+        "and it tells you when it can't know something (like who owns a private IP).")
+    sample = scenarios.path("real_psexec") / "logs.jsonl"
+    st.download_button("⬇️ Download a sample file (real PsExec attack, GHOST format)",
+                       sample.read_bytes(), file_name="ghost_sample_psexec.jsonl",
+                       mime="application/json")
+    st.caption("Raw Windows samples: any dataset from "
+               "[OTRF Security Datasets](https://github.com/OTRF/Security-Datasets), unzipped.")
+    st.stop()
+
+truth = []
+if scenario == UPLOAD:
+    try:
+        ranges = tuple(ingest.parse_ranges(ranges_text))
+        df, alerts, detect_secs, ctx = load_upload(uploaded.name, uploaded.getvalue(), ranges)
+    except ingest.UploadError as e:
+        st.error(f"Couldn't use that file: {e}")
+        st.stop()
+else:
+    df, alerts, detect_secs = load_everything(scenario)
+    ctx = scenarios.load_context(scenario)
+    truth = scenarios.load_truth(scenario)
 
 # First visit to a scenario: show the saved Nemotron investigation right away,
 # so visitors see real results without an API key or a wait.
-if ss.get("autoloaded") != scenario and not ss.reports and REPORTS.exists():
+if ss.get("autoloaded") != scenario and not ss.reports and REPORTS and REPORTS.exists():
     ss.reports = {r["alert_id"]: r for r in json.loads(REPORTS.read_text())}
     ss.autoloaded, ss.showing_saved = scenario, True
 
@@ -189,16 +247,17 @@ if ss.get("showing_saved") and ss.reports:
 reports = [ss.reports[a["id"]] for a in alerts if a["id"] in ss.reports]
 confirmed = [r for r in reports if r.get("verdict") == "true_positive"]
 found = {t for r in confirmed for t in r.get("mitre", [])}
-expected, hit = scenarios.technique_recall(scenarios.load_truth(scenario), found)
+expected, hit = scenarios.technique_recall(truth, found)
 avg_secs = (sum(r.get("seconds", 0) for r in reports) / len(reports)) if reports else None
 
 k = st.columns(5)
 k[0].metric("Events scanned", f"{len(df):,}", f"in {detect_secs:.2f}s", delta_color="off")
 k[1].metric("Alerts raised", len(alerts))
 k[2].metric("Confirmed attacks", len(confirmed) if reports else "—")
-k[3].metric("Answer-key coverage", f"{len(hit)}/{len(expected)}" if reports else "—",
+k[3].metric("Answer-key coverage", f"{len(hit)}/{len(expected)}" if reports and truth else "—",
             help="MITRE techniques in the scenario's answer key that the agent identified. "
-                 "A sub-technique (T1021.002) counts for its parent (T1021).")
+                 "A sub-technique (T1021.002) counts for its parent (T1021). "
+                 "Uploaded logs have no answer key.")
 k[4].metric("Avg triage time", f"{avg_secs:.0f}s" if avg_secs else "—",
             "vs ~15 min manual (estimate)" if avg_secs else None, delta_color="off")
 
@@ -228,7 +287,12 @@ st.caption(ctx.get("chart_note", "") + " Can you spot the attack without the age
 # ---------------------------------------------------------------- live run
 def run_live():
     prior = []
-    for alert in alerts:
+    todo = alerts
+    if scenario == UPLOAD and PUBLIC and mode.startswith("Nemotron") and len(alerts) > MAX_UPLOAD_ALERTS:
+        todo = sorted(alerts, key=lambda a: SEV_RANK.get(a["severity"], 9))[:MAX_UPLOAD_ALERTS]
+        st.caption(f"Investigating the {MAX_UPLOAD_ALERTS} most severe of {len(alerts)} alerts "
+                   "to keep the shared demo affordable. Run GHOST locally to investigate all.")
+    for alert in todo:
         model = MockModel() if mode.startswith("Practice") else NIMModel()
         with st.status(f"🔎 Investigating {alert['id']}: {alert['summary']}",
                        expanded=True) as status:
@@ -253,7 +317,7 @@ def run_live():
             t.pop("result_full", None)
     # Only real Nemotron runs replace the saved results; a practice run never
     # overwrites them (on a shared server, visitors would erase each other's view)
-    if mode.startswith("Nemotron") and not PUBLIC:
+    if mode.startswith("Nemotron") and not PUBLIC and REPORTS:
         REPORTS.parent.mkdir(exist_ok=True)
         REPORTS.write_text(json.dumps(prior, indent=2))
 
@@ -275,7 +339,7 @@ if confirmed:
         with cols[i * 2]:
             with st.container(border=True):
                 st.markdown(f"**{i + 1}. {r.get('title', r['alert_id'])}**")
-                st.caption(" · ".join(f"{t} {MITRE.get(t, {}).get('name', '')}"
+                st.caption(" · ".join(f"{t} {technique_name(t)}"
                                       for t in r.get("mitre", [])))
         if i < len(confirmed) - 1:
             cols[i * 2 + 1].markdown("<h2 style='text-align:center;margin-top:12px'>→</h2>",
@@ -287,8 +351,7 @@ st.subheader("Alerts")
 if not reports and not run:
     st.info("Press **▶ Run live investigation** in the sidebar to watch the agent work.")
 
-benign = {b["alert_id"]: b for b in scenarios.benign_results(
-    scenarios.load_truth(scenario), alerts, ss.reports)}
+benign = {b["alert_id"]: b for b in scenarios.benign_results(truth, alerts, ss.reports)}
 
 for a in alerts:
     r = ss.reports.get(a["id"])
@@ -324,7 +387,11 @@ for a in alerts:
                 st.markdown(f"- {e}")
             if r.get("mitre"):
                 st.markdown("**MITRE ATT&CK**  \n" + "  ".join(
-                    f"`{t}` {MITRE.get(t, {}).get('name', '')}" for t in r["mitre"]))
+                    f"`{t}` {technique_name(t)}" for t in r["mitre"]))
+            if r.get("candidate_mitre"):
+                st.caption("🔍 Possible, suggested by the full MITRE ATT&CK search but not tied to "
+                           "evidence, so not counted: " + ", ".join(
+                               f"{t} {technique_name(t)}" for t in r["candidate_mitre"]))
             if r.get("unverified_mitre"):
                 st.caption("⚠️ Rejected by grounding check (claimed without evidence): "
                            + ", ".join(r["unverified_mitre"]))

@@ -15,7 +15,8 @@ Built for the Nebius x NVIDIA Global AI Hackathon (deadline: Oct 30, 2026).
 1. **Look (30 seconds).** Pick a real attack in the sidebar, e.g. *Empire Invoke-PsExec (OTRF)*. Nemotron's saved investigation loads instantly: the attack chain, each alert's verdict, evidence, MITRE ATT&CK techniques, and the step-by-step trail of what the AI did.
 2. **Watch it run (1 minute).** Choose **Nemotron (real AI)** and press **▶ Run live investigation**. Nemotron, served by Nebius Token Factory, investigates every alert live. Each visitor gets a few live runs; **Practice** mode (a scripted replay, no AI) is unlimited.
 3. **Check the false alarm.** Pick *Empire Invoke-SMBExec* and open the medium LSASS alert: Microsoft's Azure agent, correctly dismissed as a false positive, matching the dataset's answer key.
-4. **Run it yourself.** See Quick start below: `python -m src.main --mock` needs no API key.
+4. **Bring your own logs.** Choose **📤 Upload your own logs** in the scenario menu and drop in a file: GHOST-format events or raw Windows Security/Sysmon event logs as JSON lines (as OTRF, Winlogbeat and many SIEM exports store them). A sample file is one click away on that page.
+5. **Run it yourself.** See Quick start below: `python -m src.main --mock` needs no API key.
 
 ---
 
@@ -66,17 +67,17 @@ Real scenarios come from the [OTRF Security Datasets](https://github.com/OTRF/Se
 
 ## Benchmark
 
-Final run (October 5, 2026), `nvidia/Nemotron-3_5-Lightning` via **Nebius Token Factory**:
+Latest run (October 13, 2026, with the full MITRE ATT&CK search enabled), `nvidia/Nemotron-3_5-Lightning` via **Nebius Token Factory**:
 
 | Scenario | Events | Answer key | Detection | Agent | Agent time |
 |---|---|---|---|---|---|
-| Practice attack (synthetic) | 1,270 | T1021, T1048, T1078, T1110 | 3/4 | 4/4 | 32 s |
-| Mimikatz LogonPasswords (OTRF) | 6,015 | T1003.001 | 1/1 | 1/1 | 18 s |
-| Empire Invoke-PsExec (OTRF) | 4,335 | T1021 | 1/1 | 1/1 | 36 s |
-| Empire Invoke-SMBExec (OTRF) | 7,489 | T1021.002 | 1/1 | 1/1 | 38 s |
-| Empire Invoke-WMI (OTRF) | 6,352 | T1047 | 1/1 | 1/1 | 54 s |
+| Practice attack (synthetic) | 1,270 | T1021, T1048, T1078, T1110 | 3/4 | 4/4 | 36 s |
+| Mimikatz LogonPasswords (OTRF) | 6,015 | T1003.001 | 1/1 | 1/1 | 17 s |
+| Empire Invoke-PsExec (OTRF) | 4,335 | T1021 | 1/1 | 1/1 | 30 s |
+| Empire Invoke-SMBExec (OTRF) | 7,489 | T1021.002 | 1/1 | 1/1 | 47 s |
+| Empire Invoke-WMI (OTRF) | 6,352 | T1047 | 1/1 | 1/1 | 30 s |
 
-8/8 answer-key techniques, 0 claims rejected by the grounding check, 1 report repaired by self-correction, and the legitimate Azure agent correctly dismissed as a false positive. 178 s of agent time for 15 alerts, about 12 s per alert. The same model on NVIDIA's free endpoint (October 3) also scored 8/8 but took 1,312 s. An earlier Nebius run the same day (147 s) looked clean but had a grounding-check loophole; the table above is the run after it was closed.
+8/8 answer-key techniques, 0 claims rejected by the grounding check, 0 "possible" suggestions, 1 report repaired by self-correction, and the legitimate Azure agent correctly dismissed as a false positive. 160 s of agent time for 15 alerts, about 11 s per alert. The previous run (October 5, before the ATT&CK upgrade) scored the same 8/8 in 178 s. The same model on NVIDIA's free endpoint (October 3) also scored 8/8 but took 1,312 s. An earlier Nebius run on October 5 (147 s) looked clean but had a grounding-check loophole, since closed.
 
 **Choosing a provider:** GHOST talks to any OpenAI-compatible endpoint. Set `NIM_BASE_URL`, `NIM_MODEL` and the matching key in `.env` (see `.env.example` for NVIDIA and Nebius settings). No code changes.
 
@@ -89,6 +90,23 @@ Writes `reports/benchmark.md`, a results table across all scenarios.
 **Honest history:** when we first ran the detectors built for PsExec on the three new real attacks, they caught SMBExec (a variant) unchanged, caught only the side effects of the WMI attack, and **missed the Mimikatz password theft entirely**. That's why the WMI and LSASS detectors exist.
 
 Each scenario is a folder in `data/` with `logs.jsonl`, `ground_truth.json` (never read by detectors or the agent), and `context.json` (company IP ranges, employee directory, threat intel).
+
+### Upload your own logs
+
+`src/ingest.py` turns an uploaded file (`.jsonl`, `.json` or `.csv`, up to 50 MB) into the same event table the detectors and agent use. It accepts:
+
+- **GHOST format:** the `data/<scenario>/logs.jsonl` schema (`timestamp`, `source`, `user`, `host`, `src_ip`, `process`, `command_line`, ...).
+- **Raw Windows event logs** as flattened JSON lines (`EventID`, `Channel`, `Hostname`, `@timestamp`), normalized with the same code that built the real scenarios. Tested on the original OTRF downloads: the raw PsExec and Mimikatz files produce exactly the same events and alerts as the built-in scenarios.
+
+Uploads have no answer key and no company context. Instead of guessing, GHOST tells the agent so: a private IP with no known company ranges is reported as "ownership unknown", and visitors can type their network ranges into the sidebar. On the public demo, a live run on an upload investigates at most the 5 most severe alerts.
+
+### Full MITRE ATT&CK knowledge base (RAG)
+
+`mitre_lookup` now searches all **706 techniques of MITRE ATT&CK Enterprise v20** (names, tactics, platforms, descriptions and MITRE's linked mitigations), built from MITRE's official STIX data by `python -m src.build_attack_index` into `data/attack/enterprise_attack.json` (0.4 MB). Search uses BM25 ranking in pure Python: no extra dependencies, and every result can be explained.
+
+The grounding check stays strict. The 17-technique hand-checked table still decides what counts as evidence; full-ATT&CK search results are reference only, and run only when the table has no match. If the agent claims a technique the search suggested but the logs don't support, it appears as **"Possible, not counted"** for an analyst to confirm. A technique that appeared nowhere is still rejected as a hallucination.
+
+ATT&CK® is a registered trademark of The MITRE Corporation; data © The MITRE Corporation, used under the [ATT&CK Terms of Use](https://attack.mitre.org/resources/legal-and-branding/terms-of-use/).
 
 ### GPU benchmark (NVIDIA RAPIDS)
 
@@ -199,7 +217,8 @@ python -m cudf.pandas -m src.main
 - [x] **More real data.** 4 OTRF recordings (PsExec, SMBExec, WMI, Mimikatz), WMI and LSASS detectors, a real-world false-positive check, and a benchmark across all scenarios
 - [x] **Guardrails.** Self-correction for unreadable reports; grounding check that rejects techniques the AI claims without evidence
 - [x] **GPU proof.** 5 million events: all 8 detectors 8.9× faster on an NVIDIA T4 with RAPIDS `cudf.pandas`, identical alerts
-- [ ] **Week 3: RAG.** Replace the mini MITRE table with vector search over the full ATT&CK dataset
+- [x] **RAG.** Search over all 706 MITRE ATT&CK v20 techniques, with suggestions kept separate from evidence
+- [x] **Bring your own logs.** Upload GHOST-format or raw Windows event logs in the dashboard
 - [x] **Dashboard.** Live investigation view, attack chain, human-approved actions *(done early)*
 - [x] **Polish.** Metrics (accuracy, false positives, time to triage) and a narrated demo video
 - [ ] **Submission** on Devpost

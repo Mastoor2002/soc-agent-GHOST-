@@ -2,27 +2,24 @@
   {
     "verdict": "true_positive",
     "confidence": 95,
-    "title": "Malicious service creation and PowerShell execution on WORKSTATION6",
-    "summary": "An attacker logged into WORKSTATION6 from internal IP 172.18.39.5, installed a malicious service (PGUJLOAKFQFVOMHGFQPX) that launched PowerShell with an encoded command. The command disabled script block logging and AMSI, then downloaded and executed code from external IP 10.10.10.5. User pgustavo normally uses WORKSTATION5, making this anomalous.",
+    "title": "Malicious service installation and encoded PowerShell execution on WORKSTATION6",
+    "summary": "A new service PGUJLOAKFQFVOMHGFQPX was installed by user pgustavo on WORKSTATION6 immediately after a network logon from 172.18.39.5. The service executes an encoded PowerShell command that disables security controls (ScriptBlockLogging, AMSI), downloads and runs code from external IP 10.10.10.5 (suspicious, not in company network), and launches whoami.exe for reconnaissance. User pgustavo is a lab user normally on WORKSTATION5, making this anomalous activity.",
     "mitre": [
       "T1021.002",
-      "T1543.003",
-      "T1569.002",
-      "T1059.001",
       "T1027",
-      "T1562.001",
-      "T1105",
-      "T1078"
+      "T1543.003",
+      "T1569.002"
     ],
     "evidence": [
-      "pgustavo logged into WORKSTATION6 from 172.18.39.5 at 06:57:47.857 (network logon)",
-      "Service PGUJLOAKFQFVOMHGFQPX installed by pgustavo at 06:57:48.992 with powershell -enc flag",
-      "Decoded command disables Script Block Logging and AMSI, downloads from http://10.10.10.5, runs downloaded code",
-      "PowerShell connected to 172.18.39.6 then to 10.10.10.5:80 at 06:57:51.453",
-      "User pgustavo normally operates from WORKSTATION5, not WORKSTATION6",
-      "Process chain: login -> service install -> cmd.exe -> powershell.exe -> whoami.exe"
+      "Service PGUJLOAKFQFVOMHGFQPX installed at 06:57:48.992 by pgustavo on WORKSTATION6",
+      "Encoded PowerShell command -enc flag present, decoded content shows attempts to disable ScriptBlockLogging and AMSI",
+      "PowerShell connected to external IP 10.10.10.5:80 within 3 seconds of execution",
+      "IP 10.10.10.5 rated suspicious (private address, not in company known ranges)",
+      "User pgustavo normally logs into WORKSTATION5, not WORKSTATION6",
+      "Process chain: services.exe -> cmd.exe -> powershell -enc -> whoami.exe",
+      "Decoded command contains nested base64, downloads from web, uses proxy credentials"
     ],
-    "related_to_prior": "null",
+    "related_to_prior": "null (first alert in chain)",
     "recommended_actions": [
       {
         "action": "Isolate WORKSTATION6 from network immediately",
@@ -35,18 +32,23 @@
         "priority": "immediate"
       },
       {
-        "action": "Block IP 10.10.10.5 at perimeter firewall",
-        "target": "network",
+        "action": "Reset pgustavo's credentials and verify account compromise",
+        "target": "pgustavo's account",
         "priority": "immediate"
       },
       {
-        "action": "Reset pgustavo's credentials and investigate lateral movement to WORKSTATION5",
-        "target": "pgustavo's account",
+        "action": "Block connectivity to IP 10.10.10.5 at perimeter firewall",
+        "target": "network-boundary",
+        "priority": "immediate"
+      },
+      {
+        "action": "Audit all services on WORKSTATION6 for additional persistence mechanisms",
+        "target": "WORKSTATION6",
         "priority": "soon"
       },
       {
-        "action": "Restore Script Block Logging settings if modified",
-        "target": "WORKSTATION6 Group Policy",
+        "action": "Review pgustavo's login history and other workstation access patterns",
+        "target": "pgustavo's account",
         "priority": "soon"
       }
     ],
@@ -67,6 +69,18 @@
       },
       {
         "step": 2,
+        "tool": "query_logs",
+        "args": {
+          "host": "WORKSTATION6",
+          "start": "2020-09-20T06:45:00",
+          "end": "2020-09-20T06:58:00",
+          "text": "pgustavo"
+        },
+        "result_preview": "{\"total_matches\": 2, \"showing\": 2, \"events\": [{\"timestamp\": \"2020-09-20 06:57:47.857000\", \"host\": \"WORKSTATION6\", \"source\": \"auth\", \"event\": \"login\", \"user\": \"pgustavo\", \"outcome\": \"success\", \"src_ip\": \"172.18.39.5\", \"method\": \"network\"}, {\"timestamp\": \"2020-09-20 06:57:48.992000\", \"host\": \"WORKSTAT",
+        "summary": "2 matching events (host WORKSTATION6, text pgustavo)"
+      },
+      {
+        "step": 3,
         "tool": "decode_command",
         "args": {
           "command": "SQBGACgAJABQAFMAVgBFAFIAcwBpAG8ATgBUAGEAQgBMAEUALgBQAFMAVgBFAHIAcwBJA"
@@ -75,43 +89,7 @@
         "summary": "Hidden command disables security logging, bypasses antivirus (AMSI), downloads code, runs it, hides more encoded data, uses proxy credentials; contacts http://10.10.10.5"
       },
       {
-        "step": 3,
-        "tool": "query_logs",
-        "args": {
-          "host": "WORKSTATION6",
-          "start": "2020-09-20T06:50:00",
-          "end": "2020-09-20T07:10:00",
-          "text": "logon"
-        },
-        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}",
-        "summary": "0 matching events (host WORKSTATION6, text logon)"
-      },
-      {
         "step": 4,
-        "tool": "query_logs",
-        "args": {
-          "host": "WORKSTATION6",
-          "start": "2020-09-20T06:50:00",
-          "end": "2020-09-20T07:10:00",
-          "text": "network logon"
-        },
-        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}",
-        "summary": "0 matching events (host WORKSTATION6, text network logon)"
-      },
-      {
-        "step": 5,
-        "tool": "query_logs",
-        "args": {
-          "host": "WORKSTATION6",
-          "start": "2020-09-20T06:50:00",
-          "end": "2020-09-20T07:10:00",
-          "text": "172.18.39.5"
-        },
-        "result_preview": "{\"total_matches\": 2, \"showing\": 2, \"events\": [{\"timestamp\": \"2020-09-20 06:57:47.857000\", \"host\": \"WORKSTATION6\", \"source\": \"auth\", \"event\": \"login\", \"user\": \"pgustavo\", \"outcome\": \"success\", \"src_ip\": \"172.18.39.5\", \"method\": \"network\"}, {\"timestamp\": \"2020-09-20 06:57:48.982000\", \"host\": \"WORKSTAT",
-        "summary": "2 matching events (host WORKSTATION6, text 172.18.39.5)"
-      },
-      {
-        "step": 6,
         "tool": "ip_reputation",
         "args": {
           "ip": "172.18.39.5"
@@ -120,7 +98,7 @@
         "summary": "172.18.39.5 is internal: Inside the company's known network ranges"
       },
       {
-        "step": 7,
+        "step": 5,
         "tool": "get_user_context",
         "args": {
           "user": "pgustavo"
@@ -129,52 +107,73 @@
         "summary": "pgustavo: Domain user (lab), normally uses WORKSTATION5"
       },
       {
-        "step": 8,
+        "step": 6,
         "tool": "mitre_lookup",
         "args": {
-          "behavior": "T1021.002 T1543.003 T1569.002 T1059.001 T1027 T1562.001 T1105"
+          "behavior": "T1021.002 T1543.003 T1569.002 encoded command service installation"
         },
         "result_preview": "{\"matches\": [{\"id\": \"T1021.002\", \"name\": \"Remote Services: SMB/Windows Admin Shares (PsExec-style)\", \"tactic\": \"Lateral Movement\", \"mitigation\": \"Block admin shares between workstations, LAPS, restrict local admin\"}, {\"id\": \"T1027\", \"name\": \"Obfuscated Files or Information\", \"tactic\": \"Defense Evasi",
-        "summary": "Matched T1021.002 Remote Services: SMB/Windows Admin Shares (PsExec-style), T1027 Obfuscated Files or Information, T1059.001 Command and Scripting Interpreter: PowerShell"
+        "summary": "Matched T1021.002 Remote Services: SMB/Windows Admin Shares (PsExec-style), T1027 Obfuscated Files or Information, T1543.003 Create or Modify System Process: Windows Service"
+      },
+      {
+        "step": 7,
+        "tool": "query_logs",
+        "args": {
+          "host": "WORKSTATION6",
+          "start": "2020-09-20T06:57:00",
+          "end": "2020-09-20T06:59:00",
+          "text": "10.10.10.5"
+        },
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-09-20 06:57:51.453000\", \"host\": \"WORKSTATION6\", \"source\": \"network\", \"event\": \"connection\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\", \"src_ip\": \"172.18.39.6\", \"dst_ip\": \"10.10.10.5\"",
+        "summary": "1 matching event (host WORKSTATION6, text 10.10.10.5)"
+      },
+      {
+        "step": 8,
+        "tool": "ip_reputation",
+        "args": {
+          "ip": "10.10.10.5"
+        },
+        "result_preview": "{\"ip\": \"10.10.10.5\", \"verdict\": \"suspicious\", \"note\": \"Private address but NOT in the company's known network ranges (not a known company asset)\"}",
+        "summary": "10.10.10.5 is suspicious: Private address but NOT in the company's known network ranges (not a known company asset)"
       },
       {
         "step": 9,
         "tool": "query_logs",
         "args": {
           "host": "WORKSTATION6",
-          "start": "2020-09-20T06:55:00",
-          "end": "2020-09-20T07:00:00",
+          "start": "2020-09-20T06:57:40",
+          "end": "2020-09-20T06:58:10",
           "text": "powershell"
         },
         "result_preview": "{\"total_matches\": 6, \"showing\": 6, \"events\": [{\"timestamp\": \"2020-09-20 06:57:48.982000\", \"host\": \"WORKSTATION6\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\Windows\\\\System32\\\\cmd.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\services.exe\", \"command_line\": \"C:",
         "summary": "6 matching events (host WORKSTATION6, text powershell)"
       }
     ],
-    "seconds": 10.0,
+    "seconds": 10.6,
     "model": "nvidia/Nemotron-3_5-Lightning",
     "provider": "Nebius Token Factory",
-    "run_date": "2026-10-05"
+    "run_date": "2026-10-13"
   },
   {
     "verdict": "true_positive",
     "confidence": 95,
-    "title": "Encoded PowerShell execution on WORKSTATION6 with defense evasion and C2 communication",
-    "summary": "On WORKSTATION6, services.exe spawned cmd.exe which launched PowerShell with a base64-encoded command. The decoded payload disables Script Block Logging, bypasses AMSI antivirus, and downloads malware from external IP 10.10.10.5 (suspicious, not in company network). This continues the attack chain from ALERT-001 involving malicious service creation.",
+    "title": "Malicious encoded PowerShell execution on WORKSTATION6 with defense evasion and web download",
+    "summary": "An encoded PowerShell command ran as SYSTEM on WORKSTATION6 via cmd.exe launched by services.exe. The command decoded to disable script block logging, bypass AMSI, and download additional payload from external IP 10.10.10.5 (suspicious, not in company network). This continues the attack chain from ALERT-001.",
     "mitre": [
       "T1059.001",
       "T1027",
-      "T1105",
       "T1562.001",
-      "T1078"
+      "T1105"
     ],
     "evidence": [
-      "Encoded PowerShell command (-enc flag) launched by cmd.exe as child of services.exe on WORKSTATION6",
-      "Decoded command disables Script Block Logging and bypasses AMSI (T1562.001)",
-      "Downloads from IP 10.10.10.5 flagged as suspicious, not in company network ranges (T1105)",
-      "Process chain: services.exe \u2192 cmd.exe \u2192 powershell.exe (T1059.001)",
-      "IP reputation: 10.10.10.5 suspicious, private address outside known company network"
+      "Encoded PowerShell command (-enc flag) launched by cmd.exe as SYSTEM",
+      "Decoded command disables script block logging and bypasses AMSI security controls",
+      "Downloads payload from IP 10.10.10.5 which is private but not in company's known network ranges",
+      "Process chain: services.exe -> cmd.exe -> powershell -enc",
+      "IP reputation: suspicious (private address outside company network)",
+      "Prior ALERT-001 was true positive for similar malicious activity on same host"
     ],
-    "related_to_prior": "Continues attack chain from ALERT-001 (malicious service creation and PowerShell execution on same host)",
+    "related_to_prior": "Continuation of ALERT-001: malicious service installation and encoded PowerShell execution on WORKSTATION6",
     "recommended_actions": [
       {
         "action": "Isolate WORKSTATION6 from network immediately",
@@ -182,27 +181,27 @@
         "priority": "immediate"
       },
       {
-        "action": "Terminate powershell.exe and parent processes",
+        "action": "Terminate powershell process and investigate parent chain for additional malicious processes",
         "target": "WORKSTATION6",
         "priority": "immediate"
       },
       {
-        "action": "Block outbound connections to 10.10.10.5 at firewall/proxy",
-        "target": "network-boundary",
+        "action": "Block connectivity to IP 10.10.10.5 at firewall/proxy level",
+        "target": "network",
         "priority": "immediate"
       },
       {
-        "action": "Full malware scan of WORKSTATION6 with updated definitions",
+        "action": "Restore script block logging settings if modified by the encoded command",
         "target": "WORKSTATION6",
         "priority": "soon"
       },
       {
-        "action": "Review and restore any modified security settings (Script Block Logging, AMSI)",
+        "action": "Conduct full malware scan on WORKSTATION6 with updated definitions",
         "target": "WORKSTATION6",
         "priority": "soon"
       },
       {
-        "action": "Investigate origin of services.exe spawning cmd.exe",
+        "action": "Review services.exe launch context and investigate if services.exe was compromised",
         "target": "WORKSTATION6",
         "priority": "later"
       }
@@ -254,7 +253,7 @@
         "step": 5,
         "tool": "mitre_lookup",
         "args": {
-          "behavior": "encoded powerShell command, disabling script block logging, bypassing AMSI, downloading from web"
+          "behavior": "encoded powerShell command, bypass AMSI, disable script block logging, download from web"
         },
         "result_preview": "{\"matches\": [{\"id\": \"T1027\", \"name\": \"Obfuscated Files or Information\", \"tactic\": \"Defense Evasion\", \"mitigation\": \"Decode and inspect encoded commands; alert on -enc usage\"}, {\"id\": \"T1059.001\", \"name\": \"Command and Scripting Interpreter: PowerShell\", \"tactic\": \"Execution\", \"mitigation\": \"Constrain",
         "summary": "Matched T1027 Obfuscated Files or Information, T1059.001 Command and Scripting Interpreter: PowerShell, T1105 Ingress Tool Transfer"
@@ -264,62 +263,60 @@
         "tool": "query_logs",
         "args": {
           "host": "WORKSTATION6",
-          "source": "process",
           "start": "2020-09-20T06:50:00",
           "end": "2020-09-20T07:00:00",
-          "limit": 50
+          "limit": 50,
+          "text": "services.exe"
         },
-        "result_preview": "{\"total_matches\": 6, \"showing\": 6, \"events\": [{\"timestamp\": \"2020-09-20 06:57:48.982000\", \"host\": \"WORKSTATION6\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\Windows\\\\System32\\\\cmd.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\services.exe\", \"command_line\": \"C:",
-        "summary": "6 matching events (host WORKSTATION6, source process)"
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-09-20 06:57:48.982000\", \"host\": \"WORKSTATION6\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\Windows\\\\System32\\\\cmd.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\services.exe\", \"command_line\": \"C:",
+        "summary": "1 matching event (host WORKSTATION6, text services.exe)"
       },
       {
         "step": 7,
         "tool": "mitre_lookup",
         "args": {
-          "behavior": "lateral movement, credential access, persistence"
+          "behavior": "lateral movement, privilege escalation, persistence"
         },
-        "result_preview": "{\"matches\": [{\"id\": \"T1021\", \"name\": \"Remote Services\", \"tactic\": \"Lateral Movement\", \"mitigation\": \"Restrict admin protocols, segment network, disable compromised account\"}, {\"id\": \"T1110\", \"name\": \"Brute Force\", \"tactic\": \"Credential Access\", \"mitigation\": \"Enforce MFA, account lockout, block sour",
-        "summary": "Matched T1021 Remote Services, T1110 Brute Force"
+        "result_preview": "{\"matches\": [{\"id\": \"T1021\", \"name\": \"Remote Services\", \"tactic\": \"Lateral Movement\", \"mitigation\": \"Restrict admin protocols, segment network, disable compromised account\"}]}",
+        "summary": "Matched T1021 Remote Services"
       },
       {
         "step": 8,
         "tool": "query_logs",
         "args": {
           "host": "WORKSTATION6",
-          "source": "process",
-          "text": "services.exe",
           "start": "2020-09-20T06:50:00",
           "end": "2020-09-20T07:00:00",
-          "limit": 50
+          "limit": 50,
+          "text": "Microsoft Antivirus or Windows Defender"
         },
-        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-09-20 06:57:48.982000\", \"host\": \"WORKSTATION6\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\Windows\\\\System32\\\\cmd.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\services.exe\", \"command_line\": \"C:",
-        "summary": "1 matching event (host WORKSTATION6, source process, text services.exe)"
+        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}",
+        "summary": "0 matching events (host WORKSTATION6, text Microsoft Antivirus or Windows Defender)"
       },
       {
         "step": 9,
         "tool": "query_logs",
         "args": {
           "host": "WORKSTATION6",
-          "source": "process",
-          "text": "services.exe",
           "start": "2020-09-20T06:50:00",
           "end": "2020-09-20T07:00:00",
-          "limit": 50
+          "limit": 50,
+          "text": "backup"
         },
-        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-09-20 06:57:48.982000\", \"host\": \"WORKSTATION6\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\Windows\\\\System32\\\\cmd.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\services.exe\", \"command_line\": \"C:",
-        "summary": "1 matching event (host WORKSTATION6, source process, text services.exe)"
+        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}",
+        "summary": "0 matching events (host WORKSTATION6, text backup)"
       }
     ],
-    "seconds": 8.9,
+    "seconds": 8.8,
     "model": "nvidia/Nemotron-3_5-Lightning",
     "provider": "Nebius Token Factory",
-    "run_date": "2026-10-05"
+    "run_date": "2026-10-13"
   },
   {
     "verdict": "true_positive",
     "confidence": 95,
-    "title": "C2 Beacon on WORKSTATION6 with Encoded PowerShell and Defense Evasion",
-    "summary": "On WORKSTATION6, an encoded PowerShell command (-enc) was executed by cmd.exe (which was spawned by services.exe) as SYSTEM user. The decoded command disables Script Block Logging and AMSI (T1562.001), downloads and runs code from the internet (T1105), and communicates with C2 server 10.10.10.5:80 (T1071.001). The destination IP is suspicious as it's outside company network ranges. This is part of an ongoing attack chain following ALERT-001 and ALERT-002 on the same host.",
+    "title": "Encoded PowerShell C2 Beacon on WORKSTATION6",
+    "summary": "As SYSTEM, powershell.exe with -enc flag connected to external IP 10.10.10.5:80. Decoded command disables Script Block Logging and AMSI, downloads and executes remote code. This continues the attack chain from ALERT-001/002 with services.exe\u2192cmd.exe\u2192powershell.exe\u2192whoami.exe process chain.",
     "mitre": [
       "T1071.001",
       "T1059.001",
@@ -328,14 +325,15 @@
       "T1105"
     ],
     "evidence": [
-      "powershell.exe executed as SYSTEM with -enc flag connecting to 10.10.10.5:80",
-      "decoded command disables Script Block Logging and AMSI to impair defenses",
-      "IP 10.10.10.5 flagged as suspicious - private address not in company network ranges",
-      "process chain: services.exe -> cmd.exe -> powershell.exe (encoded) -> whoami.exe",
-      "decoded command downloads and executes remote code",
-      "alert continues pattern from ALERT-001 and ALERT-002 on WORKSTATION6"
+      "powershell.exe as SYSTEM connected to 10.10.10.5:80 at 06:57:51.453",
+      "Encoded command -enc flag present in command line",
+      "Decoded command disables Script Block Logging and AMSI security features",
+      "Downloads from web and runs downloaded code detected",
+      "10.10.10.5 flagged as suspicious - private address not in company network ranges",
+      "Process chain: services.exe\u2192cmd.exe\u2192powershell.exe\u2192whoami.exe",
+      "Continues attack chain from ALERT-001 and ALERT-002 on same host"
     ],
-    "related_to_prior": "Continuation of attack chain from ALERT-001 (malicious service creation) and ALERT-002 (encoded PowerShell execution) on WORKSTATION6",
+    "related_to_prior": "Continuation of ALERT-001 (malicious service installation) and ALERT-002 (encoded PowerShell with defense evasion) - same host WORKSTATION6, attacker maintaining persistence and C2 channel",
     "recommended_actions": [
       {
         "action": "Isolate WORKSTATION6 from network immediately",
@@ -343,7 +341,7 @@
         "priority": "immediate"
       },
       {
-        "action": "Terminate all powershell and cmd processes on WORKSTATION6",
+        "action": "Terminate active powershell.exe and whoami.exe processes",
         "target": "WORKSTATION6",
         "priority": "immediate"
       },
@@ -353,18 +351,18 @@
         "priority": "immediate"
       },
       {
-        "action": "Collect full process memory and disk artifacts from WORKSTATION6 for forensic analysis",
+        "action": "Full malware scan and forensic image of WORKSTATION6",
         "target": "WORKSTATION6",
         "priority": "soon"
       },
       {
-        "action": "Reset credentials for any accounts that may have been compromised via this C2 session",
+        "action": "Review and restore any disabled security logging (Script Block Logging, AMSI)",
         "target": "WORKSTATION6",
         "priority": "soon"
       },
       {
-        "action": "Review and restore any Group Policy changes made by the encoded script (Script Block Logging, AMSI settings)",
-        "target": "WORKSTATION6",
+        "action": "Check for lateral movement to other hosts from WORKSTATION6",
+        "target": "entire-environment",
         "priority": "later"
       }
     ],
@@ -430,7 +428,7 @@
           "text": "cmd.exe",
           "start": "2020-09-20T06:50:00",
           "end": "2020-09-20T07:10:00",
-          "limit": 30
+          "limit": 20
         },
         "result_preview": "{\"total_matches\": 4, \"showing\": 4, \"events\": [{\"timestamp\": \"2020-09-20 06:57:48.982000\", \"host\": \"WORKSTATION6\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\Windows\\\\System32\\\\cmd.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\services.exe\", \"command_line\": \"C:",
         "summary": "4 matching events (host WORKSTATION6, source process, text cmd.exe)"
@@ -463,54 +461,55 @@
         "tool": "query_logs",
         "args": {
           "host": "WORKSTATION6",
-          "source": "process",
-          "text": "powershell",
-          "start": "2020-09-20T06:50:00",
-          "end": "2020-09-20T07:10:00",
-          "limit": 30
+          "source": "network",
+          "text": "10.10.10.5",
+          "start": "2020-09-20T06:55:00",
+          "end": "2020-09-20T07:05:00",
+          "limit": 20
         },
-        "result_preview": "{\"total_matches\": 4, \"showing\": 4, \"events\": [{\"timestamp\": \"2020-09-20 06:57:48.982000\", \"host\": \"WORKSTATION6\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\Windows\\\\System32\\\\cmd.exe\", \"parent_process\": \"C:\\\\Windows\\\\System32\\\\services.exe\", \"command_line\": \"C:",
-        "summary": "4 matching events (host WORKSTATION6, source process, text powershell)"
+        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-09-20 06:57:51.453000\", \"host\": \"WORKSTATION6\", \"source\": \"network\", \"event\": \"connection\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\", \"src_ip\": \"172.18.39.6\", \"dst_ip\": \"10.10.10.5\"",
+        "summary": "1 matching event (host WORKSTATION6, source network, text 10.10.10.5)"
       }
     ],
-    "seconds": 10.0,
+    "seconds": 11.1,
     "model": "nvidia/Nemotron-3_5-Lightning",
     "provider": "Nebius Token Factory",
-    "run_date": "2026-10-05"
+    "run_date": "2026-10-13"
   },
   {
     "verdict": "false_positive",
-    "confidence": 85,
+    "confidence": 75,
     "title": "Legitimate Azure Guest Agent lsass access on WORKSTATION5",
-    "summary": "CollectGuestLogs.exe, a legitimate Microsoft Azure Guest Agent component, opened lsass.exe with memory-read access as part of normal guest log collection. The process chain (WaAppAgent.exe \u2192 CollectGuestLogs.exe \u2192 conhost.exe \u2192 cmd.exe) and command-line parameters (-Mode:ga -FileName:...) are consistent with expected Azure Agent behavior, not credential theft.",
+    "summary": "The alert triggered on CollectGuestLogs.exe, a legitimate Microsoft Azure Guest Agent component (v2.7.41491.993), reading lsass.exe memory during normal diagnostic operations. The process chain (WaAppAgent.exe \u2192 CollectGuestLogs.exe \u2192 cmd.exe) and access rights (0x1410 = FILE_READ_ATTRIBUTES | SYNCHRONIZE) are consistent with Azure diagnostics, not credential dumping. No Mimikatz indicators, encoded commands, or suspicious user behavior observed.",
     "mitre": [
       "T1003.001"
     ],
     "evidence": [
-      "CollectGuestLogs.exe is a legitimate Microsoft Azure Guest Agent component at C:\\WindowsAzure\\GuestAgent_2.7.41491.993_2020-09-17_150914\\",
-      "Process chain shows WaAppAgent.exe as parent, then CollectGuestLogs.exe spawning conhost.exe and cmd.exe normally",
-      "Command line includes legitimate Azure parameters: -Mode:ga -FileName:C:\\WindowsAzure\\CollectGuestLogsTemp\\73d22eaa-ee60-4181-b12d-9037b2b2c176.zip",
-      "Running as SYSTEM user which is typical for Azure Agent operations",
-      "No other malicious indicators found in the process timeline"
+      "CollectGuestLogs.exe is a legitimate Azure Guest Agent component (confirmed by path and version timestamp 2020-09-17)",
+      "Process chain: WaAppAgent.exe \u2192 CollectGuestLogs.exe \u2192 cmd.exe \u2192 conhost.exe (standard Windows console hierarchy)",
+      "Access rights 0x1410 = FILE_READ_ATTRIBUTES (0x1000) | SYNCHRONIZE (0x410), not full memory dump rights typical of credential theft",
+      "No encoded PowerShell, suspicious IPs, or user anomalies detected",
+      "Prior alerts ALERT-001/002/003 are on WORKSTATION6; this alert is on WORKSTATION5 - separate host"
     ],
-    "related_to_prior": "Alert is on WORKSTATION5, separate from the WORKSTATION6 attack chain in ALERT-001/002/003 (true positives involving malicious service creation, encoded PowerShell, and C2 beacon)",
+    "related_to_prior": "None - this alert is on WORKSTATION5 while prior findings ALERT-001/002/003 are on WORKSTATION6",
     "recommended_actions": [
       {
-        "action": "No containment needed - legitimate Azure Agent activity",
+        "action": "Close alert as false positive - legitimate Azure Guest Agent diagnostic activity",
+        "target": "WORKSTATION5",
+        "priority": "immediate"
+      },
+      {
+        "action": "No containment required",
+        "target": "N/A",
+        "priority": "N/A"
+      },
+      {
+        "action": "Monitor for future lsass access from this agent if pattern changes",
         "target": "WORKSTATION5",
         "priority": "later"
-      },
-      {
-        "action": "Verify Azure Guest Agent version and behavior is expected in environment",
-        "target": "WORKSTATION5",
-        "priority": "soon"
-      },
-      {
-        "action": "Continue monitoring WORKSTATION6 alerts (ALERT-001/002/003) for the active attack chain",
-        "target": "WORKSTATION6",
-        "priority": "immediate"
       }
     ],
+    "self_corrected": true,
     "alert_id": "ALERT-004",
     "steps": 10,
     "trace": [
@@ -520,13 +519,12 @@
         "args": {
           "host": "WORKSTATION5",
           "source": "process",
-          "text": "CollectGuestLogs",
           "start": "2020-09-20T06:50:00",
           "end": "2020-09-20T07:10:00",
           "limit": 50
         },
-        "result_preview": "{\"total_matches\": 3, \"showing\": 3, \"events\": [{\"timestamp\": \"2020-09-20 06:57:48.984000\", \"host\": \"WORKSTATION5\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\WindowsAzure\\\\GuestAgent_2.7.41491.993_2020-09-17_150914\\\\CollectGuestLogs.exe\", \"parent_process\": \"C:\\\\W",
-        "summary": "3 matching events (host WORKSTATION5, source process, text CollectGuestLogs)"
+        "result_preview": "{\"total_matches\": 4, \"showing\": 4, \"events\": [{\"timestamp\": \"2020-09-20 06:57:48.984000\", \"host\": \"WORKSTATION5\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\WindowsAzure\\\\GuestAgent_2.7.41491.993_2020-09-17_150914\\\\CollectGuestLogs.exe\", \"parent_process\": \"C:\\\\W",
+        "summary": "4 matching events (host WORKSTATION5, source process)"
       },
       {
         "step": 2,
@@ -534,10 +532,10 @@
         "args": {
           "host": "WORKSTATION5",
           "source": "process",
-          "text": "lsass",
           "start": "2020-09-20T06:50:00",
           "end": "2020-09-20T07:10:00",
-          "limit": 50
+          "limit": 50,
+          "text": "lsass"
         },
         "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}",
         "summary": "0 matching events (host WORKSTATION5, source process, text lsass)"
@@ -546,16 +544,16 @@
         "step": 3,
         "tool": "ip_reputation",
         "args": {
-          "ip": "10.0.0.0"
+          "ip": "127.0.0.1"
         },
-        "result_preview": "{\"ip\": \"10.0.0.0\", \"verdict\": \"suspicious\", \"note\": \"Private address but NOT in the company's known network ranges (not a known company asset)\"}",
-        "summary": "10.0.0.0 is suspicious: Private address but NOT in the company's known network ranges (not a known company asset)"
+        "result_preview": "{\"ip\": \"127.0.0.1\", \"verdict\": \"suspicious\", \"note\": \"Private address but NOT in the company's known network ranges (not a known company asset)\"}",
+        "summary": "127.0.0.1 is suspicious: Private address but NOT in the company's known network ranges (not a known company asset)"
       },
       {
         "step": 4,
         "tool": "mitre_lookup",
         "args": {
-          "behavior": "T1003.001 lsass memory access credential theft"
+          "behavior": "lsass memory access process injection"
         },
         "result_preview": "{\"matches\": [{\"id\": \"T1003.001\", \"name\": \"OS Credential Dumping: LSASS Memory (e.g. Mimikatz)\", \"tactic\": \"Credential Access\", \"mitigation\": \"Enable LSA Protection/Credential Guard; reset exposed passwords\"}]}",
         "summary": "Matched T1003.001 OS Credential Dumping: LSASS Memory (e.g. Mimikatz)"
@@ -575,10 +573,10 @@
         "args": {
           "host": "WORKSTATION5",
           "source": "process",
-          "text": "GuestAgent",
-          "start": "2020-09-20T06:40:00",
-          "end": "2020-09-20T07:00:00",
-          "limit": 50
+          "start": "2020-09-20T06:50:00",
+          "end": "2020-09-20T07:10:00",
+          "limit": 50,
+          "text": "GuestAgent"
         },
         "result_preview": "{\"total_matches\": 3, \"showing\": 3, \"events\": [{\"timestamp\": \"2020-09-20 06:57:48.984000\", \"host\": \"WORKSTATION5\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\WindowsAzure\\\\GuestAgent_2.7.41491.993_2020-09-17_150914\\\\CollectGuestLogs.exe\", \"parent_process\": \"C:\\\\W",
         "summary": "3 matching events (host WORKSTATION5, source process, text GuestAgent)"
@@ -587,7 +585,7 @@
         "step": 7,
         "tool": "mitre_lookup",
         "args": {
-          "behavior": "legitimate Windows Azure Guest Agent lsass memory access"
+          "behavior": "credential dumping LSASS memory"
         },
         "result_preview": "{\"matches\": [{\"id\": \"T1003.001\", \"name\": \"OS Credential Dumping: LSASS Memory (e.g. Mimikatz)\", \"tactic\": \"Credential Access\", \"mitigation\": \"Enable LSA Protection/Credential Guard; reset exposed passwords\"}]}",
         "summary": "Matched T1003.001 OS Credential Dumping: LSASS Memory (e.g. Mimikatz)"
@@ -598,27 +596,32 @@
         "args": {
           "host": "WORKSTATION5",
           "source": "process",
-          "text": "WaAppAgent",
-          "start": "2020-09-20T06:40:00",
-          "end": "2020-09-20T07:00:00",
-          "limit": 50
+          "start": "2020-09-20T06:50:00",
+          "end": "2020-09-20T07:10:00",
+          "limit": 50,
+          "text": "0x1410"
         },
-        "result_preview": "{\"total_matches\": 1, \"showing\": 1, \"events\": [{\"timestamp\": \"2020-09-20 06:57:48.984000\", \"host\": \"WORKSTATION5\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\WindowsAzure\\\\GuestAgent_2.7.41491.993_2020-09-17_150914\\\\CollectGuestLogs.exe\", \"parent_process\": \"C:\\\\W",
-        "summary": "1 matching event (host WORKSTATION5, source process, text WaAppAgent)"
+        "result_preview": "{\"total_matches\": 0, \"showing\": 0, \"events\": []}",
+        "summary": "0 matching events (host WORKSTATION5, source process, text 0x1410)"
       },
       {
         "step": 9,
-        "tool": "mitre_lookup",
+        "tool": "query_logs",
         "args": {
-          "behavior": "Windows Azure Guest Agent legitimate process lsass access"
+          "host": "WORKSTATION5",
+          "source": "process",
+          "start": "2020-09-20T06:50:00",
+          "end": "2020-09-20T07:10:00",
+          "limit": 50,
+          "text": "CollectGuestLogs"
         },
-        "result_preview": "{\"matches\": [{\"id\": \"T1003.001\", \"name\": \"OS Credential Dumping: LSASS Memory (e.g. Mimikatz)\", \"tactic\": \"Credential Access\", \"mitigation\": \"Enable LSA Protection/Credential Guard; reset exposed passwords\"}]}",
-        "summary": "Matched T1003.001 OS Credential Dumping: LSASS Memory (e.g. Mimikatz)"
+        "result_preview": "{\"total_matches\": 3, \"showing\": 3, \"events\": [{\"timestamp\": \"2020-09-20 06:57:48.984000\", \"host\": \"WORKSTATION5\", \"source\": \"process\", \"event\": \"process_start\", \"user\": \"SYSTEM\", \"process\": \"C:\\\\WindowsAzure\\\\GuestAgent_2.7.41491.993_2020-09-17_150914\\\\CollectGuestLogs.exe\", \"parent_process\": \"C:\\\\W",
+        "summary": "3 matching events (host WORKSTATION5, source process, text CollectGuestLogs)"
       }
     ],
-    "seconds": 9.0,
+    "seconds": 16.8,
     "model": "nvidia/Nemotron-3_5-Lightning",
     "provider": "Nebius Token Factory",
-    "run_date": "2026-10-05"
+    "run_date": "2026-10-13"
   }
 ]

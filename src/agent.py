@@ -218,25 +218,34 @@ TECHNIQUE_ID = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
 def ground_mitre(report: dict, alert: dict, trace: list[dict]) -> dict:
     """GROUNDING CHECK: the model may only claim techniques it actually saw this
     investigation — in the alert's rule tags or in a tool result. Anything else is
-    probably recalled from memory (a hallucination), so it is set aside as
-    'unverified' and doesn't count toward the score."""
-    seen = set(alert.get("rule_tags", []))
+    set aside and doesn't count toward the score:
+      candidate_mitre  - surfaced by the full ATT&CK search but not tied to evidence:
+                         plausible, for a human analyst to confirm
+      unverified_mitre - never surfaced anywhere: recalled from memory (a hallucination)"""
+    seen, suggested = set(alert.get("rule_tags", [])), set()
     seen |= set(TECHNIQUE_ID.findall(SYSTEM_PROMPT))  # techniques our own guidance names
     for t in trace:
         text = t.get("result_full", t.get("result_preview", ""))
         if t.get("tool") == "mitre_lookup":
-            # Only real MATCHES count. On a miss the tool lists every known technique as
-            # options to choose from; those are a menu, not evidence (found 2026-10-05:
-            # T1048 Exfiltration slipped into an SMBExec report through that menu).
+            # Only real MATCHES count. Search results from the full ATT&CK knowledge base
+            # are suggestions, not evidence (lesson of 2026-10-05: T1048 Exfiltration
+            # slipped into an SMBExec report through a list of options like that).
             try:
-                text = json.dumps(json.loads(text).get("matches", []))
+                parsed = json.loads(text)
+                suggested |= {m.get("id") for m in parsed.get("attack_search", [])}
+                text = json.dumps(parsed.get("matches", []))
             except (ValueError, AttributeError):
-                text = text.split('"available"')[0]
+                head, _, tail = text.partition('"attack_search"')
+                suggested |= set(TECHNIQUE_ID.findall(tail))
+                text = head.split('"available"')[0]
         seen |= set(TECHNIQUE_ID.findall(text))
     seen |= {t.split(".")[0] for t in seen}  # a confirmed T1059.001 supports its parent T1059
     claimed = [m.strip() for m in report.get("mitre", []) if isinstance(m, str)]
     report["mitre"] = [m for m in claimed if m in seen]
-    unverified = [m for m in claimed if m not in seen]
+    candidates = [m for m in claimed if m not in seen and m in suggested]
+    unverified = [m for m in claimed if m not in seen and m not in suggested]
+    if candidates:
+        report["candidate_mitre"] = candidates
     if unverified:
         report["unverified_mitre"] = unverified
     return report
